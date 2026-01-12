@@ -1,0 +1,6 @@
+pandas
+kafka-python
+pyarrow
+minio
+pymongo
+delta-spark
