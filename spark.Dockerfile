@@ -1,20 +1,27 @@
-# Sử dụng image gốc của Apache Spark
+# 1. Base Image
 FROM apache/spark:3.5.0-python3
 
-# Chuyển sang quyền root để cài thư viện
+# Chuyển sang root để cài cắm
 USER root
 
-# Thiết lập thư mục làm việc (Optional nhưng nên có)
-WORKDIR /opt/spark/work-dir
+# 2. Cài các công cụ cơ bản (Giữ gcc/python3-dev để phòng hờ, nhưng BỎ librdkafka-dev)
+# Lý do: librdkafka-dev trong apt quá cũ, gây xung đột.
+RUN set -ex; \
+    apt-get update && \
+    apt-get install -y gcc g++ python3-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# --- PHẦN QUAN TRỌNG: COPY VÀ CÀI ĐẶT ---
-# 1. Copy file requirements từ máy thật vào trong image
+WORKDIR /opt/spark/work-dir
 COPY requirements.txt .
 
-# 2. Chạy pip install theo danh sách trong file
+# 3. QUAN TRỌNG NHẤT: Nâng cấp pip, setuptools và wheel
+# Pip cũ trong image Spark không nhận diện được file .whl mới của confluent-kafka
+# nên nó mới cố đâm đầu vào việc build từ source và gặp lỗi.
+RUN pip install --upgrade pip setuptools wheel
+
+# 4. Cài đặt thư viện (Lúc này nó sẽ tải file .whl thay vì .tar.gz)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# ---
-# (Tùy chọn) Nếu bạn muốn mặc định user là spark (185) thì uncomment dòng dưới
-# Nhưng với môi trường Dev/Đồ án thì để root cho đỡ lỗi permission volume
-# USER 185
+# Trả lại quyền cho user Spark
+USER 185

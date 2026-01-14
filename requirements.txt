@@ -1,5 +1,5 @@
 pandas
-kafka-python
+confluent-kafka
 pyarrow
 minio
 pymongo
