@@ -4,7 +4,7 @@ import os
 
 # --- CẤU HÌNH ---
 # Đọc từ thư mục đã được làm sạch (QUAN TRỌNG)
-INPUT_PATH = "/opt/data_clean/*.parquet" 
+INPUT_PATH = "/opt/data/data_clean/*.parquet" 
 # Ghi ra thư mục kết quả
 OUTPUT_PATH = "/opt/data/processed_sorted"
 

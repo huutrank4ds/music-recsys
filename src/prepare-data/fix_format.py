@@ -3,8 +3,8 @@ import pyarrow.parquet as pq
 from pathlib import Path
 import shutil
 
-SOURCE_DIR = Path('/opt/data/')
-DEST_DIR = Path('/opt/data_clean/')
+SOURCE_DIR = Path('/opt/data/raw')
+DEST_DIR = Path('/opt/data/data_clean/')
 
 def rebirth_parquet():
     print("🔥 BẮT ĐẦU QUY TRÌNH TÁI SINH DỮ LIỆU (PANDAS CHUNKING)")
