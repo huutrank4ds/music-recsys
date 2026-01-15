@@ -7,7 +7,7 @@ SOURCE_DIR = Path('/opt/data/raw')
 DEST_DIR = Path('/opt/data/data_clean/')
 
 def rebirth_parquet():
-    print("🔥 BẮT ĐẦU QUY TRÌNH TÁI SINH DỮ LIỆU (PANDAS CHUNKING)")
+    print("BẮT ĐẦU QUY TRÌNH TÁI SINH DỮ LIỆU (PANDAS CHUNKING)")
     
     if DEST_DIR.exists(): shutil.rmtree(DEST_DIR)
     DEST_DIR.mkdir(parents=True, exist_ok=True)
@@ -15,7 +15,7 @@ def rebirth_parquet():
     files = [f for f in SOURCE_DIR.glob("*.parquet") if f.is_file() and not f.name.startswith("_")]
 
     for file_path in files:
-        print(f"👉 Xử lý: {file_path.name}")
+        print(f" Xử lý: {file_path.name}")
         dest_path = DEST_DIR / file_path.name
         
         try:
@@ -46,10 +46,10 @@ def rebirth_parquet():
             
             if not first_chunk:
                 writer.close()
-                print(f"   ✅ Đã tái sinh thành công: {dest_path}")
+                print(f"  Đã tái sinh thành công: {dest_path}")
 
         except Exception as e:
-            print(f"   ❌ Lỗi: {e}")
+            print(f"  Lỗi: {e}")
 
 if __name__ == "__main__":
     rebirth_parquet()

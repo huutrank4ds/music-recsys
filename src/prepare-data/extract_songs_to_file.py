@@ -43,18 +43,18 @@ def main():
     input_files = get_valid_parquet_files(BASE_DIR)
     
     if not input_files:
-        print("❌ Không tìm thấy file!")
+        print("Không tìm thấy file!")
         return
 
-    print(f"✅ Tìm thấy {len(input_files)} file sạch.")
+    print(f"Tìm thấy {len(input_files)} file sạch.")
 
-    print("\n🚀 Khởi tạo Spark Session...")
+    print("\nKhởi tạo Spark Session...")
     spark = SparkSession.builder \
         .appName("ExtractSongsFixedType") \
         .config("spark.driver.memory", "3g") \
         .getOrCreate()
 
-    # Schema giữ nguyên
+    # Định nghĩa schema tĩnh để tránh lỗi schema inference
     song_schema = StructType([
         StructField("musicbrainz_track_id", StringType(), True),
         StructField("track_name", StringType(), True),
@@ -69,30 +69,30 @@ def main():
         # Spark nhận list các đường dẫn string
         raw_df = spark.read.schema(song_schema).parquet(*input_files)
         
-        print("🔄 Đang xử lý ETL...")
+        print("Đang xử lý ETL...")
         songs_df = raw_df.select(
-            col("musicbrainz_track_id").alias("id"),
+            col("musicbrainz_track_id").alias("_id"),
             col("track_name"),
             col("musicbrainz_artist_id"),
             col("artist_name"),
             col("track_index"),
             col("artist_index")
-        ).dropDuplicates(["id"])
+        ).dropDuplicates(["_id"])
 
         count = songs_df.count()
-        print(f"🎵 Tìm thấy tổng cộng: {count} bài hát duy nhất.")
+        print(f"Tìm thấy tổng cộng: {count} bài hát duy nhất.")
 
-        print(f"💾 Đang ghi file JSON vào: {OUTPUT_DIR}")
+        print(f"Đang ghi file JSON vào: {OUTPUT_DIR}")
         
         # Ghi song song (Không dùng coalesce để tránh OOM)
         songs_df.write \
             .mode("overwrite") \
             .json(OUTPUT_DIR)
 
-        print("✅ THÀNH CÔNG! Bây giờ bạn hãy kiểm tra thư mục data.")
+        print("THÀNH CÔNG! Bây giờ bạn hãy kiểm tra thư mục data.")
 
     except Exception as e:
-        print(f"💥 VẪN CÒN LỖI: {e}")
+        print(f"VẪN CÒN LỖI: {e}")
     finally:
         spark.stop()
 

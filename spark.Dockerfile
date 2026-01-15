@@ -23,5 +23,9 @@ RUN pip install --upgrade pip setuptools wheel
 # 4. Cài đặt thư viện (Lúc này nó sẽ tải file .whl thay vì .tar.gz)
 RUN pip install --no-cache-dir -r requirements.txt
 
+# 5. Tạo thư mục .ivy2 cache cho user spark (để tải dependencies khi chạy spark-submit)
+RUN mkdir -p /home/spark/.ivy2/cache /home/spark/.ivy2/jars && \
+    chown -R 185:185 /home/spark
+
 # Trả lại quyền cho user Spark
 USER 185

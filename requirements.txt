@@ -4,3 +4,4 @@ pyarrow
 minio
 pymongo
 delta-spark
+datasets
