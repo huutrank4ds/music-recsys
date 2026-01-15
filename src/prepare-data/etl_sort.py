@@ -1,6 +1,5 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
-import os
 
 # --- CẤU HÌNH ---
 # Đọc từ thư mục đã được làm sạch (QUAN TRỌNG)

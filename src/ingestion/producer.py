@@ -1,7 +1,6 @@
 import json
 import socket
 import time
-import sys
 from datetime import datetime
 import pyarrow.parquet as pq
 from pathlib import Path

@@ -135,6 +135,36 @@ services:
       - mongo_data:/data/db
     networks:
       - bigdata-net
+  
+  # -----------------------------------------------------------
+  # 6. Sync songs data to MongoDB
+  # -----------------------------------------------------------
+  etl-sync:
+    image: ${SPARK_IMAGE_NAME}:${SPARK_VERSION}
+    container_name: music-etl-sync
+    user: root # Để có quyền đọc file
+    depends_on:
+      - mongodb
+      - spark-master
+    volumes:
+      - ./src:/opt/src
+      - ./data:/opt/data
+    command: >
+      /bin/bash -c "
+      pip install pymongo && 
+      while true; do 
+        echo '🚀 Starting Daily Sync Job...';
+        
+        # Chạy Python và kiểm tra kết quả
+        if python3 -u /opt/src/2_processing/sync_master_data.py; then
+          echo '✅ Sync Success! Sleeping for 24 hours...';
+          sleep 86400;  # 86400 giây = 24 giờ
+        else
+          echo '❌ Sync Failed! Retrying in 10 seconds...';
+          sleep 10;     # Ngủ 10s rồi thử lại ngay, tránh spam log liên tục
+        fi
+        
+      done"
 
 networks:
   bigdata-net:
