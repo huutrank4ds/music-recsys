@@ -9,7 +9,7 @@ from pyspark.sql.types import StructType, StructField, StringType, IntegerType, 
 def get_valid_parquet_files(data_dir):
     print(f"🔍 Đang quét file trong: {data_dir}")
     if not os.path.exists(data_dir):
-        print(f"❌ Thư mục không tồn tại: {data_dir}")
+        print(f"Thư mục không tồn tại: {data_dir}")
         return []
 
     all_files = glob.glob(os.path.join(data_dir, "*.parquet"))
@@ -30,32 +30,32 @@ def main():
 
     input_files = get_valid_parquet_files(BASE_DIR)
     if not input_files:
-        print("❌ Không tìm thấy file!")
+        print("Không tìm thấy file!")
         return
 
-    print(f"✅ Tìm thấy {len(input_files)} file sạch.")
+    print(f"Tìm thấy {len(input_files)} file sạch.")
 
-    print("\n🚀 Khởi tạo Spark Session...")
+    print("\nKhởi tạo Spark Session...")
     spark = SparkSession.builder \
         .appName("ExtractSongsFixedType") \
         .config("spark.driver.memory", "2g") \
         .getOrCreate()
 
-    # ⚠️ SỬA LỖI TẠI ĐÂY: Dùng LongType cho các trường Index
+    # SỬA LỖI TẠI ĐÂY: Dùng LongType cho các trường Index
     song_schema = StructType([
         StructField("musicbrainz_track_id", StringType(), True),
         StructField("track_name", StringType(), True),
         StructField("musicbrainz_artist_id", StringType(), True),
         StructField("artist_name", StringType(), True),
-        StructField("track_index", LongType(), True),   # <--- Đã sửa thành LongType
-        StructField("artist_index", LongType(), True)   # <--- Đã sửa thành LongType
+        StructField("track_index", LongType(), True),   
+        StructField("artist_index", LongType(), True)   
     ])
 
     try:
-        print("📖 Đang đọc dữ liệu...")
+        print("Đang đọc dữ liệu...")
         raw_df = spark.read.schema(song_schema).parquet(*input_files)
         
-        print("🔄 Đang xử lý ETL...")
+        print("Đang xử lý ETL...")
         songs_df = raw_df.select(
             col("musicbrainz_track_id").alias("id"),
             col("track_name"),
@@ -66,19 +66,19 @@ def main():
         ).dropDuplicates(["id"])
 
         count = songs_df.count()
-        print(f"🎵 Tìm thấy tổng cộng: {count} bài hát duy nhất.")
+        print(f"Tìm thấy tổng cộng: {count} bài hát duy nhất.")
 
-        print(f"💾 Đang ghi file JSON vào: {OUTPUT_DIR}")
+        print(f"Đang ghi file JSON vào: {OUTPUT_DIR}")
         
         # Ghi đè (overwrite) để xóa dữ liệu lỗi cũ nếu có
         songs_df.write \
             .mode("overwrite") \
             .json(OUTPUT_DIR)
 
-        print("✅ THÀNH CÔNG! Bây giờ bạn hãy kiểm tra thư mục data.")
+        print("THÀNH CÔNG! Bây giờ bạn hãy kiểm tra thư mục data.")
 
     except Exception as e:
-        print(f"💥 VẪN CÒN LỖI: {e}")
+        print(f"VẪN CÒN LỖI: {e}")
     finally:
         spark.stop()
 
