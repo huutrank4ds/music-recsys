@@ -21,6 +21,11 @@ Tổ chức mã nguồn và dữ liệu được phân chia rõ ràng theo các 
 ```text
 music-recsys/
 ├── docker-compose.yml           # Quản lý hạ tầng (Spark, Kafka, Mongo, MinIO)
+├── .env
+├── scripts/
+│   ├── download_data.py
+│   ├── fix_format.py
+│   └── preprocess_sort.py
 ├── configs/                     # Các file cấu hình môi trường
 │   └── spark-defaults.conf
 ├── data/                        # Dữ liệu (Mounted Volume - Máy Host)
@@ -29,15 +34,19 @@ music-recsys/
 │   ├── songs_master_list/       # File JSON danh sách bài hát (Output bước ETL)
 │   └── checkpoints/             # Spark Streaming Checkpoints
 ├── src/                         # Mã nguồn chính
-│   ├── 1_ingestion/             # Tầng thu thập dữ liệu
-│   │   ├── producer.py          # Giả lập hành vi User -> Kafka (Time Travel logic)
-│   │   └── stream_to_minio.py   # Spark Streaming: Đọc Kafka -> Ghi MinIO
-│   ├── 2_processing/            # Tầng xử lý Batch & AI
-│   │   ├── etl_master_data.py   # Trích xuất danh sách bài hát -> MongoDB
-│   │   └── train_als_model.py   # Huấn luyện ALS -> MongoDB (UserRecs & ItemSims)
-│   └── 3_serving/               # Tầng phục vụ (Backend)
-│       └── api_server.py        # API Query MongoDB trả về Frontend
-└── notebooks/                   # Jupyter Notebook (Dùng để kiểm thử nhanh)
+│   ├── config.py
+│   ├── utils.py
+│   ├── app/                       <-- (Web App & API)
+│   │   ├── __init__.py
+│   │   ├── main.py                <-- (File chạy chính của Web)
+│   │   └── templates/
+│   │       └── index.html
+│   └── pipelines/
+│       ├── ingestion/
+│       │   ├── producer.py
+│       │   └── kafka_to_minio.py
+│       └── batch/
+│           └── sync_songs_master.py
 ```
 
 ## 🗄️ 3. Database Design (MongoDB Schema)
