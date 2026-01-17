@@ -62,9 +62,9 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `_id` | String | **PK**. Track ID (UUID) |
-| `title` | String | Tên bài hát |
-| `artist` | String | Tên nghệ sĩ |
-| `artist_id` | String | Mã định danh nghệ sĩ |
+| `track_name` | String | Tên bài hát |
+| `artist_name` | String | Tên nghệ sĩ |
+| `musicbrainz_artist_id` | String | Mã định danh nghệ sĩ |
 
 #### Collection: `users`
 > Lưu trữ vector sở thích người dùng (cập nhật hàng đêm).
