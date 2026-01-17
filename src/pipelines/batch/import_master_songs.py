@@ -1,15 +1,14 @@
 import json
 import time
 from pathlib import Path
-from pymongo import MongoClient, UpdateOne, WriteConcern
+from pymongo import MongoClient, UpdateOne #type: ignore
+import src.configs as cfg
 
 # ================= CẤU HÌNH =================
-MONGO_URI = "mongodb://mongodb:27017"
-DB_NAME = "music_recsys"
-COLLECTION_NAME = "songs"
-DATA_DIR = Path("/opt/data/songs_master_list")
-
-# 🔥 FIX 1: Tăng Batch Size lên 2000 để giảm nghẽn mạng
+MONGO_URI = cfg.MONGO_URI
+DB_NAME = cfg.MONGO_DB
+COLLECTION_NAME = cfg.COLLECTION_SONGS
+DATA_DIR = Path(cfg.SONGS_MASTER_LIST_PATH)
 BATCH_SIZE = 2000 
 
 # ================= CLASS: THANH TIẾN TRÌNH =================
@@ -32,14 +31,11 @@ class DockerProgressBar:
     def _print_log(self, now):
         elapsed = now - self.start_time
         if elapsed == 0: elapsed = 0.001
-        
         percent = self.current / self.total if self.total > 0 else 0
         percent = min(percent, 1.0)
-        
         speed = self.current / elapsed
         remaining_items = self.total - self.current
         eta = remaining_items / speed if speed > 0 else 0
-        
         bar_length = 30
         filled_length = int(bar_length * percent)
 
@@ -49,10 +45,7 @@ class DockerProgressBar:
             bar = "=" * bar_length
         else:
             bar = "-" * (filled_length - 1) + ">" + " " * (bar_length - filled_length)
-
         eta_str = time.strftime("%M:%S", time.gmtime(eta))
-        
-        # 🔥 FIX 2: Thêm flush=True để ép hiển thị ngay trên Docker
         print(f"\r🚀 {self.desc}: |{bar}| {percent:.1%} [{self.current}/{self.total}] "
               f"Speed: {speed:.0f}/s | ETA: {eta_str}", end="", flush=True)
 
@@ -119,6 +112,12 @@ def sync_data():
     pbar = DockerProgressBar(total=total_records, desc="Syncing", min_interval=2.0)
     
     operations = []
+
+    ALLOWED_FIELDS = {
+        "track_name", 
+        "artist_name", 
+        "musicbrainz_artist_id", # Giữ lại nếu muốn làm trang profile nghệ sĩ
+    }
     
     for file_path in json_files:
         with file_path.open("r", encoding="utf-8") as f:
@@ -126,13 +125,18 @@ def sync_data():
                 try:
                     record = json.loads(line)
                     song_id = record.get("id")
-                    if not song_id: continue
-                    
-                    del record["id"]
+                    if not song_id: 
+                        song_id = record.get("_id")
+                    if not song_id:
+                        pbar.update(1)
+                        continue
+
+                    # Lọc chỉ giữ các trường cần thiết
+                    filtered_record = {k: v for k, v in record.items() if k in ALLOWED_FIELDS}
                     
                     ops = UpdateOne(
                         {"_id": song_id},           
-                        {"$set": record},           
+                        {"$set": filtered_record},           
                         upsert=True                 
                     )
                     operations.append(ops)

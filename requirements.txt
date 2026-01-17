@@ -1,3 +1,4 @@
+# --- Data Processing & Storage ---
 pandas
 confluent-kafka
 pyarrow
@@ -5,3 +6,12 @@ minio
 pymongo
 delta-spark
 datasets
+
+# --- Web App & API ---
+fastapi
+uvicorn
+jinja2
+python-multipart
+
+# --- Configuration ---
+python-dotenv

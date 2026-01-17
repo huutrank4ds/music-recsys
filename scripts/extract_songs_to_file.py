@@ -74,9 +74,7 @@ def main():
             col("musicbrainz_track_id").alias("_id"),
             col("track_name"),
             col("musicbrainz_artist_id"),
-            col("artist_name"),
-            col("track_index"),
-            col("artist_index")
+            col("artist_name")
         ).dropDuplicates(["_id"])
 
         count = songs_df.count()
