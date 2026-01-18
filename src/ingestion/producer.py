@@ -43,9 +43,9 @@ def ensure_topic_exists():
     cluster_metadata = admin_client.list_topics(timeout=10)
     
     if TOPIC in cluster_metadata.topics:
-        print(f"✅ Topic '{TOPIC}' đã tồn tại.")
+        print(f" Topic '{TOPIC}' đã tồn tại.")
     else:
-        print(f"⚠️ Topic chưa có. Đang tạo mới với {NUM_PARTITIONS} partitions...")
+        print(f" Topic chưa có. Đang tạo mới với {NUM_PARTITIONS} partitions...")
         # Định nghĩa topic mới
         new_topic = NewTopic(
             topic=TOPIC, 
@@ -59,25 +59,25 @@ def ensure_topic_exists():
         for topic, future in fs.items():
             try:
                 future.result()  # Block chờ tạo xong
-                print(f"🎉 Đã tạo thành công topic: {topic}")
+                print(f" Đã tạo thành công topic: {topic}")
             except Exception as e:
-                print(f"❌ Không thể tạo topic {topic}: {e}")
+                print(f" Không thể tạo topic {topic}: {e}")
 
 # ================= GENERATOR =================
 def source_data_generator(data_dir, skip_time=True):
     files = sorted([f for f in data_dir.glob("*.parquet") if f.is_file() and not f.name.startswith('.')])
     if not files:
-        print("❌ Không tìm thấy file.")
+        print(" Không tìm thấy file.")
         return
 
     first_data_ts = None # Thời gian dữ liệu đầu tiên
     wall_clock_start = None # Thời gian thực khi bắt đầu
     time_skip_accumulation = 0 # Tổng thời gian nhảy cóc
 
-    print(f"🚀 Bắt đầu Replay với tốc độ: x{SPEED_FACTOR}")
+    print(f" Bắt đầu Replay với tốc độ: x{SPEED_FACTOR}")
     
     for file_path in files:
-        print(f"\n📖 Đọc file: {file_path.name}")
+        print(f"\n Đọc file: {file_path.name}")
         parquet_file = pq.ParquetFile(file_path)
 
         for batch in parquet_file.iter_batches(batch_size=BATCH_SIZE):
@@ -116,7 +116,7 @@ def source_data_generator(data_dir, skip_time=True):
 
 # ================= MAIN =================
 def delivery_report(err, msg):
-    if err is not None: print(f'❌ Lỗi: {err}')
+    if err is not None: print(f' Lỗi: {err}')
 
 def run_producer():
     # 1. KIỂM TRA TOPIC TRƯỚC KHI CHẠY
@@ -136,14 +136,14 @@ def run_producer():
             producer.poll(0)
             total_sent += 1
             if total_sent % 100 == 0:
-                print(f"✅ Sent: {total_sent} | Time: {record[TIMESTAMP_COL]}", end='\r')
+                print(f" Sent: {total_sent} | Time: {record[TIMESTAMP_COL]}", end='\r')
         
         producer.flush(10)
-        print(f"\n🎉 DONE: {total_sent}")
+        print(f"\n DONE: {total_sent}")
     except KeyboardInterrupt:
-        print("\n🛑 Stopped.")
+        print("\n Stopped.")
     except Exception as e:
-        print(f"\n💥 Error: {e}")
+        print(f"\n Error: {e}")
 
 if __name__ == "__main__":
     run_producer()

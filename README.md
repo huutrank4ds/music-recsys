@@ -120,9 +120,67 @@ Quy trình vận hành được chia thành 3 giai đoạn hoạt động tuần
 
 ## ✅ 5. Implementation Checklist
 
-- [x] **Infrastructure:** Setup Docker Compose (Spark, Kafka, Mongo, MinIO).
+- [x] **Infrastructure:** Setup Docker Compose (Spark, Kafka, Mongo, MinIO, Milvus).
 - [x] **Producer:** Python script giả lập dữ liệu vào Kafka (Time Travel logic).
-- [ ] **Streaming Consumer:** Spark Structured Streaming đọc Kafka $\rightarrow$ Ghi MinIO Parquet.
-- [ ] **ETL Master Data:** Spark Batch trích xuất bài hát từ Parquet $\rightarrow$ MongoDB `songs`.
-- [ ] **AI Model:** Spark MLlib train ALS & Item Similarity $\rightarrow$ MongoDB `user_recommendations` & `song_similarities`.
-- [ ] **Backend API:** Python/NodeJS API query MongoDB phục vụ Frontend.
+- [x] **Streaming Consumer:** Spark Structured Streaming đọc Kafka → Ghi MinIO Parquet.
+- [x] **ETL Master Data:** Spark Batch trích xuất bài hát từ Parquet → MongoDB `songs`.
+- [x] **ETL Users:** Spark Batch trích xuất users từ Parquet → MongoDB `users`.
+- [x] **AI Model:** Spark MLlib train ALS & Sync vectors:
+  - User Factors → MongoDB `users.latent_vector`
+  - Item Factors → Milvus `music_collection`
+- [ ] **Backend API:** Python/NodeJS API query MongoDB + Milvus phục vụ Frontend.
+
+---
+
+## 🔹 6. Milvus Vector Database
+
+### Collection: `music_collection`
+> **Mục đích:** Lưu trữ vector đặc trưng của bài hát để tìm kiếm tương đồng (Item-based).
+> **Metric Type:** IP (Inner Product) - Tương thích với thuật toán ALS.
+> **Index Type:** IVF_FLAT
+
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `id` | VARCHAR(100) | **PK**. Track ID (Map với MongoDB) |
+| `embedding` | FLOAT_VECTOR(64) | Item Factors từ Spark ALS |
+
+### How it works:
+1. **Training:** Spark ALS train model → Extract itemFactors (64-dim vectors).
+2. **Indexing:** Insert vectors vào Milvus với IVF_FLAT index.
+3. **Search:** Query user vector (từ MongoDB) → Milvus trả về Top-K similar songs.
+
+---
+
+## 🔄 7. Phase 2: Batch Training (Nightly Job)
+
+### Chiến lược Sliding Window
+Dùng dữ liệu **90 ngày gần nhất** để train model.
+
+### Workflow:
+```bash
+# Bước 1: ETL Master Data (songs)
+docker exec spark-master spark-submit /opt/src/processing/etl_master_data.py
+
+# Bước 2: ETL Users 
+docker exec spark-master spark-submit /opt/src/processing/etl_users.py
+
+# Bước 3: Train ALS & Sync Vectors
+docker exec spark-master spark-submit /opt/src/processing/train_als_model.py
+```
+
+### Output:
+- **MongoDB `users`**: Mỗi user có `latent_vector` (64-dim).
+- **Milvus `music_collection`**: Mỗi bài hát có `embedding` (64-dim).
+
+---
+
+## 📦 8. Docker Services
+
+| Service | Port | Purpose |
+| :--- | :--- | :--- |
+| Kafka | 9092, 9094 | Message Queue |
+| Kafka UI | 8080 | Kafka Dashboard |
+| Spark Master | 9090 | Spark Web UI |
+| MinIO | 9000, 9001 | Object Storage (Data Lake) |
+| MongoDB | 27017 | Metadata & User Profiles |
+| Milvus | 19530 | Vector Database |

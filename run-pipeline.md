@@ -1,9 +1,9 @@
 ---
-description: Chạy pipeline streaming từ đầu đến cuối (Download → Clean → Sort → Kafka → Spark → MinIO → MongoDB)
+description: Chạy pipeline streaming từ đầu đến cuối (Download → Clean → Sort → Kafka → Spark → MinIO → MongoDB → Milvus)
 ---
 # Music Recommendation System - Full Pipeline
 
-Pipeline xử lý data streaming từ HuggingFace đến MinIO Data Lake và MongoDB.
+Pipeline xử lý data streaming từ HuggingFace đến MinIO Data Lake, MongoDB và Milvus.
 
 ## Kiến trúc Pipeline
 
@@ -22,15 +22,24 @@ HuggingFace Dataset (LastFM-1K)
         ↓
   data/processed_sorted/*.parquet
         ↓
-   [Producer] ──→ Kafka Topic "music_log"
-                         ↓
-               [Spark Streaming ETL]
-                         ↓
+   [Producer TURBO] ──→ Kafka Topic "music_log"
+                             ↓
+               [Spark Streaming TURBO ETL]
+                             ↓
                MinIO (s3a://datalake/raw/music_logs/)
-                         ↓
+                             ↓
                [ETL Master Data]
-                         ↓
+                             ↓
                MongoDB (music_recsys.songs)
+                             ↓
+               [ETL Users]
+                             ↓
+               MongoDB (music_recsys.users)
+                             ↓
+               [Train ALS Model]
+                    ↓         ↓
+           MongoDB        Milvus
+        (user vectors)  (item vectors)
 ```
 
 ---
@@ -45,7 +54,7 @@ docker-compose up -d
 docker-compose ps
 ```
 
-Đợi đến khi tất cả services healthy (khoảng 1-2 phút).
+Đợi đến khi tất cả services healthy (khoảng 2-3 phút cho Milvus).
 
 **Các services cần chạy:**
 
@@ -55,6 +64,15 @@ docker-compose ps
 - `spark-worker`
 - `minio`
 - `mongodb`
+- `milvus-etcd`
+- `milvus-standalone`
+
+**Kiểm tra Milvus đã sẵn sàng:**
+
+```bash
+docker logs milvus-standalone 2>&1 | tail -5
+# Nếu thấy "Milvus Proxy successfully initialized" là OK
+```
 
 ---
 
@@ -136,47 +154,61 @@ docker exec spark-master ls -lh /opt/data/processed_sorted/
 
 ---
 
-## BƯỚC 4: Khởi động Spark Streaming ETL (Terminal 1)
+## BƯỚC 4: Khởi động Spark Streaming TURBO ETL (Terminal 1)
 
 **Mở Terminal mới** và chạy:
 
 ```bash
-docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio.py"
+docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio_turbo.py"
 ```
+
+> ⚡ **TURBO Mode**: Trigger mỗi 10 giây (thay vì 1 phút), fetch size lớn hơn, tối ưu S3A upload.
 
 **Output mong đợi:**
 
 ```
-Khởi động Spark Streaming ETL...
-Đang lắng nghe Kafka Topic 'music_log'...
-Đang ghi xuống MinIO (Parquet)...
+🚀 Khởi động Spark Streaming TURBO ETL...
+⚡ Đang lắng nghe Kafka Topic 'music_log' với TURBO settings...
+💾 Đang ghi xuống MinIO (Parquet) - TURBO MODE (10s trigger)...
 ```
 
 **QUAN TRỌNG: Giữ terminal này mở, đừng tắt!**
 
 ---
 
-## BƯỚC 5: Chạy Producer (Terminal 2)
+## BƯỚC 5: Chạy Producer TURBO (Terminal 2)
 
 **Mở Terminal mới** và chạy:
 
 ```bash
-docker exec -it spark-master python3 /opt/src/ingestion/producer.py
+docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
 ```
+
+> ⚡ **TURBO Mode**: Gửi data tốc độ TỐI ĐA (không giả lập thời gian thực), ~10,000+ msg/s
 
 **Output mong đợi:**
 
 ```
-Đang kiểm tra Topic 'music_log'...
-Topic 'music_log' đã tồn tại.
-Khởi tạo Producer...
-Bắt đầu Replay với tốc độ: x200.0
-Đọc file: ...
-Sent: 100 | Time: ...
-Sent: 200 | Time: ...
+🔧 Đang kiểm tra Topic 'music_log'...
+✅ Topic 'music_log' đã tồn tại.
+🔌 Khởi tạo Producer TURBO...
+🚀 TURBO MODE: Đọc X files với tốc độ TỐI ĐA!
+
+📖 Đọc file: part-00000-xxx.parquet
+⚡ Sent: 50,000 | Rate: 12,345 msg/s | Elapsed: 4.1s
+⚡ Sent: 100,000 | Rate: 11,892 msg/s | Elapsed: 8.4s
+...
+🎉 DONE: xxx messages in Xs (xxx msg/s)
 ```
 
- **Đợi khoảng 1-2 phút** để có đủ data ghi vào MinIO, sau đó nhấn `Ctrl+C` để dừng Producer.
+**Đợi Producer chạy xong** hoặc nhấn `Ctrl+C` khi đủ data.
+
+### 📊 So sánh tốc độ:
+
+| Mode | Tốc độ | Thời gian cho 1M messages |
+|------|--------|---------------------------|
+| **producer.py** (cũ) | ~1-5 msg/s | ~50+ giờ |
+| **producer_turbo.py** (mới) | ~10,000+ msg/s | ~2 phút |
 
 ---
 
@@ -196,7 +228,7 @@ docker exec minio mc ls local/datalake/raw/music_logs/ --recursive --summarize
 
 ---
 
-## BƯỚC 7: ETL Master Data (MinIO → MongoDB)
+## BƯỚC 7: ETL Master Data (MinIO → MongoDB songs)
 
 **Dừng Spark Streaming** (Terminal 1) bằng `Ctrl+C`, sau đó restart Spark cluster:
 
@@ -225,14 +257,94 @@ THÀNH CÔNG! Đã lưu xxx bài hát vào MongoDB.
 
 ---
 
-## BƯỚC 8: Kiểm tra MongoDB
+## BƯỚC 8: ETL Users (MinIO → MongoDB users)
+
+```bash
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/processing/etl_users.py
+```
+
+**Output mong đợi:**
+
+```
+🎵 ETL Users Collection (MongoDB)
+>>> Đang đọc dữ liệu từ MinIO...
+>>> Đang lọc users duy nhất...
+>>> Đang ghi vào MongoDB...
+✅ THÀNH CÔNG! Đã lưu xxx users vào MongoDB.
+```
+
+---
+
+## BƯỚC 9: Train ALS & Sync Vectors (MongoDB + Milvus)
+
+**Chạy Training:**
+
+```bash
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 /opt/src/processing/train_als_model.py
+```
+
+**Output mong đợi:**
+
+```
+============================================================
+🎵 MUSIC RECOMMENDATION - ALS BATCH TRAINING
+   Started at: 2026-01-18 05:00:00
+============================================================
+>>> Loading data from MinIO (Last 90 days)...
+>>> Preparing data for ALS...
+>>> Training ALS Model...
+    Rank: 64, MaxIter: 15, RegParam: 0.1
+>>> ALS Model trained successfully!
+>>> Syncing User Factors to MongoDB...
+>>> MongoDB: Upserted xxx users
+>>> Syncing Item Factors to Milvus...
+>>> Setting up Milvus collection 'music_collection'...
+>>> Milvus collection created with dimension=64
+    Inserted batch 1: 1000 items
+    Inserted batch 2: 1000 items
+    ...
+>>> Milvus: Inserted xxx item embeddings
+============================================================
+✅ TRAINING COMPLETED SUCCESSFULLY!
+   Users synced to MongoDB: xxx
+   Items synced to Milvus: xxx
+============================================================
+```
+
+---
+
+## BƯỚC 10: Kiểm tra Kết quả
+
+### MongoDB
 
 ```bash
 # Đếm số bài hát
 docker exec mongodb mongo music_recsys --eval "db.songs.count()"
 
-# Xem 5 bài hát đầu tiên
-docker exec mongodb mongo music_recsys --eval "db.songs.find().limit(5).pretty()"
+# Xem 1 bài hát mẫu
+docker exec mongodb mongo music_recsys --eval "db.songs.findOne()"
+
+# Đếm số users
+docker exec mongodb mongo music_recsys --eval "db.users.count()"
+
+# Xem user với latent_vector (kiểm tra đã có vector chưa)
+docker exec mongodb mongo music_recsys --quiet --eval "var u = db.users.findOne(); print('User:', u._id); print('Vector length:', u.latent_vector ? u.latent_vector.length : 0)"
+```
+
+### Milvus
+
+```bash
+# Kiểm tra Milvus collection
+docker exec spark-master python3 -c "
+from pymilvus import connections, Collection, utility
+connections.connect(host='milvus', port=19530)
+print('Collections:', utility.list_collections())
+if 'music_collection' in utility.list_collections():
+    c = Collection('music_collection')
+    print('Entities:', c.num_entities)
+    print('Schema:', c.schema)
+connections.disconnect('default')
+"
 ```
 
 ---
@@ -253,6 +365,12 @@ docker exec mongodb mongo music_recsys --eval "db.songs.find().limit(5).pretty()
 
 - URL: http://localhost:9001
 - Xem data đã được ghi
+
+### Milvus (Check via logs)
+
+```bash
+docker logs milvus-standalone --tail 20
+```
 
 ---
 
@@ -280,8 +398,12 @@ docker exec minio mc rm local/datalake/raw/ --recursive --force
 
 # 3. Xóa MongoDB data
 docker exec mongodb mongo music_recsys --eval "db.songs.drop()"
+docker exec mongodb mongo music_recsys --eval "db.users.drop()"
 
-# 4. Chạy lại từ BƯỚC 1
+# 4. Xóa Milvus data (restart container)
+docker-compose restart milvus-standalone
+
+# 5. Chạy lại từ BƯỚC 1
 ```
 
 ---
@@ -289,13 +411,18 @@ docker exec mongodb mongo music_recsys --eval "db.songs.drop()"
 ## Cấu hình quan trọng
 
 | Config             | File                                           | Giá trị                     |
-| ------------------ | ---------------------------------------------- | ----------------------------- |
-| Kafka Bootstrap    | `producer.py`, `stream_to_minio.py`        | `kafka:9092`                |
-| MinIO Endpoint     | `stream_to_minio.py`, `etl_master_data.py` | `http://minio:9000`         |
-| MongoDB URI        | `etl_master_data.py`                         | `mongodb://mongodb:27017`   |
-| Spark Master       | `etl_master_data.py`                         | `spark://spark-master:7077` |
-| Processing Trigger | `stream_to_minio.py`                         | `1 minute`                  |
-| Producer Speed     | `producer.py`                                | `x200`                      |
+| ------------------ | ---------------------------------------------- | --------------------------- |
+| Kafka Bootstrap    | `producer*.py`, `stream_to_minio*.py`          | `kafka:9092`                |
+| MinIO Endpoint     | `stream_to_minio*.py`, `etl_master_data.py`    | `http://minio:9000`         |
+| MongoDB URI        | `etl_master_data.py`, `train_als_model.py`     | `mongodb://mongodb:27017`   |
+| **Milvus Host**    | `train_als_model.py`                           | `milvus:19530`              |
+| Spark Master       | `etl_master_data.py`                           | `spark://spark-master:7077` |
+| Processing Trigger | `stream_to_minio.py`                           | `1 minute`                  |
+| Processing Trigger | `stream_to_minio_turbo.py` ⚡                  | `10 seconds`                |
+| Producer Speed     | `producer.py`                                  | `x200` (realtime simulation)|
+| Producer Speed     | `producer_turbo.py` ⚡                         | `MAX` (no delay)            |
+| **ALS Rank**       | `train_als_model.py`                           | `64` (vector dimension)     |
+| **Sliding Window** | `train_als_model.py`                           | `90 days`                   |
 
 ---
 
@@ -324,18 +451,19 @@ docker restart spark-master spark-worker
 MONGO_IMAGE=mongo:4.4
 ```
 
-### 3. MinIO Console không truy cập được
+### 3. Docker Desktop không chạy
 
-**Nguyên nhân:** Docker Desktop chưa chạy hoặc container chưa start.
+**Nguyên nhân:** Docker Desktop chưa start.
 
 **Giải pháp:**
 
 ```bash
-# Kiểm tra Docker đang chạy
-docker ps
+# Windows: Mở Docker Desktop từ Start Menu
+# Hoặc chạy:
+Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
 
-# Khởi động lại services
-docker-compose up -d
+# Đợi Docker ready rồi kiểm tra:
+docker info
 ```
 
 ### 4. Producer không gửi được message
@@ -350,6 +478,41 @@ docker-compose ps kafka
 
 # Đợi đến khi Kafka healthy rồi chạy lại
 ```
+
+### 5. Milvus không khởi động
+
+**Nguyên nhân:** etcd hoặc MinIO chưa sẵn sàng.
+
+**Giải pháp:**
+
+```bash
+# Kiểm tra etcd
+docker logs milvus-etcd
+
+# Restart Milvus
+docker-compose restart milvus-standalone
+
+# Đợi 1-2 phút cho Milvus khởi động
+```
+
+### 6. Lỗi "Connection refused" khi sync Milvus
+
+**Nguyên nhân:** Milvus chưa fully started.
+
+**Giải pháp:**
+
+```bash
+# Kiểm tra Milvus health
+docker logs milvus-standalone 2>&1 | grep -i "successfully"
+
+# Đợi thấy dòng "Milvus Proxy successfully initialized" rồi chạy lại
+```
+
+### 7. Lỗi "'list' object has no attribute 'toArray'"
+
+**Nguyên nhân:** Spark 3.5 ALS trả về features dạng list thay vì DenseVector.
+
+**Giải pháp:** Đã được fix trong `train_als_model.py` - sử dụng hàm `convert_vector()` để handle cả 2 trường hợp.
 
 ---
 
@@ -367,11 +530,57 @@ music-recsys/
 │   │   ├── fix_format.py       # Clean data
 │   │   └── etl_sort.py         # Sort theo timestamp
 │   ├── ingestion/
-│   │   ├── producer.py         # Gửi data vào Kafka
-│   │   └── stream_to_minio.py  # Spark Streaming: Kafka → MinIO
+│   │   ├── producer.py         # Gửi data vào Kafka (chậm, simulate realtime)
+│   │   ├── producer_turbo.py   # ⚡ Gửi data tốc độ MAX
+│   │   ├── stream_to_minio.py  # Spark Streaming: Kafka → MinIO (1 min trigger)
+│   │   └── stream_to_minio_turbo.py  # ⚡ Turbo mode (10s trigger)
 │   └── processing/
-│       └── etl_master_data.py  # ETL: MinIO → MongoDB
+│       ├── etl_master_data.py  # ETL: MinIO → MongoDB (songs)
+│       ├── etl_users.py        # ETL: MinIO → MongoDB (users)
+│       └── train_als_model.py  # ALS Training → MongoDB + Milvus
 ├── docker-compose.yml
+├── spark.Dockerfile
 ├── .env
 └── run-pipeline.md             # File hướng dẫn này
+```
+
+---
+
+## 📊 Kết quả Pipeline
+
+Sau khi chạy xong toàn bộ pipeline:
+
+| Database    | Collection         | Nội dung                                          |
+| :---------- | :----------------- | :------------------------------------------------ |
+| **MongoDB** | `songs`            | Metadata bài hát (id, title, artist, track_index) |
+| **MongoDB** | `users`            | User profile + latent_vector (64-dim)             |
+| **Milvus**  | `music_collection` | Item embeddings (64-dim) với Index IVF_FLAT       |
+
+### Sử dụng cho Recommendation:
+
+1. **Home Page (User-based):** Query MongoDB `users.latent_vector` → Search Milvus `music_collection` → Top-K songs
+2. **Next Song (Item-based):** Lấy embedding của bài đang nghe từ Milvus → Search similar → Top-K songs
+
+---
+
+## ⚡ Quick Start (TURBO Mode)
+
+Nếu bạn đã có data trong `data/processed_sorted/`, chạy nhanh:
+
+```bash
+# Terminal 1: Streaming
+docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio_turbo.py"
+
+# Terminal 2: Producer (mở terminal mới)
+docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
+
+# Sau khi xong, Ctrl+C cả 2 terminal, restart spark rồi chạy:
+docker restart spark-master spark-worker
+
+# ETL + Training (chờ 15-20s sau restart)
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/processing/etl_master_data.py
+
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/processing/etl_users.py
+
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 /opt/src/processing/train_als_model.py
 ```

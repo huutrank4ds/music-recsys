@@ -5,3 +5,4 @@ minio
 pymongo
 delta-spark
 datasets
+pymilvus>=2.3.0
