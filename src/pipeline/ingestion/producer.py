@@ -91,7 +91,7 @@ class MusicStreamPlayer:
         logger.info(f"Bắt đầu Replay {len(files)} file với tốc độ: x{self.speed_factor}")
         
         for file_path in files:
-            logger.info(f"📖 Đang đọc file: {file_path.name}")
+            logger.info(f"Đang đọc file: {file_path.name}")
             try:
                 pf = pq.ParquetFile(file_path)
             except Exception as e:
@@ -187,11 +187,13 @@ def run():
                 if total_sent % 1000 == 0:
                     elapsed = time.time() - start_time
                     rate = total_sent / elapsed if elapsed > 0 else 0
-                    print(f"Sent: {total_sent:,} records | Speed: {rate:.0f} msg/s", end='\r')
+                    # Dùng \r để cập nhật dòng hiện tại
+                    print(f"\rSent: {total_sent:,} records | Speed: {rate:.0f} msg/s", end='', flush=True)
         
         elapsed = time.time() - start_time
         rate = total_sent / elapsed if elapsed > 0 else 0
-        print(f"\nHOÀN TẤT! Tổng: {total_sent:,} | Thời gian: {elapsed:.1f}s | Tốc độ: {rate:.0f} msg/s")
+        print()  # Xuống dòng
+        logger.info(f"HOÀN TẤT! Tổng: {total_sent:,} | Thời gian: {elapsed:.1f}s | Tốc độ: {rate:.0f} msg/s")
 
     except KeyboardInterrupt:
         logger.info("\nDừng chương trình theo yêu cầu.")

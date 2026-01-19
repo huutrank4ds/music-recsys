@@ -8,7 +8,6 @@ Workflow:
 4. Sync Item Factors -> Milvus (music_collection)
 """
 
-import sys
 from datetime import datetime, timedelta
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lit, current_timestamp, udf, expr
@@ -25,9 +24,13 @@ from pymilvus import (
 )
 
 # ============================================================
-# IMPORT CENTRALIZED CONFIG
+# IMPORT CENTRALIZED CONFIG & UTILS
 # ============================================================
 import src.config as cfg
+from src.utils import get_logger
+
+# Khởi tạo logger
+logger = get_logger("ALS_Training")
 
 # ALS Hyperparameters (từ config tập trung)
 ALS_RANK = cfg.ALS_RANK
@@ -80,7 +83,7 @@ def load_training_data(spark, days=SLIDING_WINDOW_DAYS):
     Load dữ liệu từ MinIO với Sliding Window.
     Chỉ lấy dữ liệu trong N ngày gần nhất.
     """
-    print(f">>> Loading data from MinIO (Last {days} days)...")
+    logger.info(f"Loading data from MinIO (Last {days} days)...")
     
     # Tính ngày bắt đầu của window
     cutoff_date = datetime.now() - timedelta(days=days)
@@ -93,11 +96,11 @@ def load_training_data(spark, days=SLIDING_WINDOW_DAYS):
         # Filter theo timestamp (Sliding Window)
         df_filtered = df.filter(col("date_str") >= cutoff_str)
         
-        print(f">>> Filtered {df_filtered.count()} records since {cutoff_str}")
+        logger.info(f"Filtered {df_filtered.count()} records since {cutoff_str}")
         return df_filtered
         
     except Exception as e:
-        print(f"ERROR loading from MinIO: {e}")
+        logger.error(f"ERROR loading from MinIO: {e}")
         return None
 
 
@@ -106,7 +109,7 @@ def prepare_als_data(df):
     Chuẩn bị dữ liệu cho ALS.
     ALS cần: user_index (int), item_index (int), rating (float)
     """
-    print(">>> Preparing data for ALS...")
+    logger.info("Preparing data for ALS...")
     
     # Đếm số lần user nghe mỗi bài (Implicit Feedback)
     # user_id -> user_index (đã có sẵn trong data)
@@ -133,14 +136,14 @@ def prepare_als_data(df):
         col("play_count").cast("float").alias("rating")
     )
     
-    print(f">>> ALS Data: {als_data.count()} interactions")
+    logger.info(f"ALS Data: {als_data.count()} interactions")
     return als_data, user_mapping
 
 
 def train_als_model(als_data):
     """Train ALS Model với Implicit Feedback."""
-    print(">>> Training ALS Model...")
-    print(f"    Rank: {ALS_RANK}, MaxIter: {ALS_MAX_ITER}, RegParam: {ALS_REG_PARAM}")
+    logger.info("Training ALS Model...")
+    logger.info(f"Rank: {ALS_RANK}, MaxIter: {ALS_MAX_ITER}, RegParam: {ALS_REG_PARAM}")
     
     als = ALS(
         rank=ALS_RANK,
@@ -156,7 +159,7 @@ def train_als_model(als_data):
     )
     
     model = als.fit(als_data)
-    print(">>> ALS Model trained successfully!")
+    logger.info("ALS Model trained successfully!")
     return model
 
 
@@ -166,7 +169,7 @@ def sync_user_factors_to_mongodb(model, user_mapping, spark):
     Collection: users
     Schema: {_id, username, latent_vector, last_updated}
     """
-    print(">>> Syncing User Factors to MongoDB...")
+    logger.info("Syncing User Factors to MongoDB...")
     
     # Lấy User Factors từ model
     user_factors = model.userFactors  # DataFrame: [id, features]
@@ -216,7 +219,7 @@ def sync_user_factors_to_mongodb(model, user_mapping, spark):
     
     if bulk_ops:
         result = collection.bulk_write(bulk_ops)
-        print(f">>> MongoDB: Upserted {result.upserted_count + result.modified_count} users")
+        logger.info(f"MongoDB: Upserted {result.upserted_count + result.modified_count} users")
     
     client.close()
     return len(user_data)
@@ -226,14 +229,14 @@ def setup_milvus_collection(dimension):
     """
     Tạo/Setup Milvus Collection cho Item Factors.
     """
-    print(f">>> Setting up Milvus collection '{MILVUS_COLLECTION}'...")
+    logger.info(f"Setting up Milvus collection '{MILVUS_COLLECTION}'...")
     
     # Kết nối Milvus
     connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
     
     # Xóa collection cũ nếu tồn tại (Replace strategy)
     if utility.has_collection(MILVUS_COLLECTION):
-        print(f"    Dropping existing collection...")
+        logger.info("Dropping existing collection...")
         utility.drop_collection(MILVUS_COLLECTION)
     
     # Định nghĩa Schema
@@ -254,7 +257,7 @@ def setup_milvus_collection(dimension):
     }
     collection.create_index(field_name="embedding", index_params=index_params)
     
-    print(f">>> Milvus collection created with dimension={dimension}")
+    logger.info(f"Milvus collection created with dimension={dimension}")
     return collection
 
 
@@ -264,7 +267,7 @@ def sync_item_factors_to_milvus(model, spark):
     Collection: music_collection
     Schema: {id (track_id), embedding (vector)}
     """
-    print(">>> Syncing Item Factors to Milvus...")
+    logger.info("Syncing Item Factors to Milvus...")
     
     # Lấy Item Factors từ model
     item_factors = model.itemFactors  # DataFrame: [id, features]
@@ -314,16 +317,16 @@ def sync_item_factors_to_milvus(model, spark):
             
             collection.insert([batch_ids, batch_embeddings])
             total_inserted += len(batch_ids)
-            print(f"    Inserted batch {i//BATCH_SIZE + 1}: {len(batch_ids)} items")
+            logger.info(f"Inserted batch {i//BATCH_SIZE + 1}: {len(batch_ids)} items")
         
         # Load collection để search
         collection.load()
         
-        print(f">>> Milvus: Inserted {total_inserted} item embeddings")
+        logger.info(f"Milvus: Inserted {total_inserted} item embeddings")
         return total_inserted
         
     except Exception as e:
-        print(f"ERROR syncing to Milvus: {e}")
+        logger.error(f"ERROR syncing to Milvus: {e}")
         raise e
     finally:
         connections.disconnect("default")
@@ -331,10 +334,10 @@ def sync_item_factors_to_milvus(model, spark):
 
 def run_training_pipeline():
     """Main training pipeline."""
-    print("=" * 60)
-    print("🎵 MUSIC RECOMMENDATION - ALS BATCH TRAINING")
-    print(f"   Started at: {datetime.now()}")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("MUSIC RECOMMENDATION - ALS BATCH TRAINING")
+    logger.info(f"Started at: {datetime.now()}")
+    logger.info("=" * 60)
     
     # 1. Khởi tạo Spark
     spark = create_spark_session()
@@ -344,7 +347,7 @@ def run_training_pipeline():
         # 2. Load dữ liệu từ MinIO (Sliding Window)
         df = load_training_data(spark, SLIDING_WINDOW_DAYS)
         if df is None or df.count() == 0:
-            print("ERROR: No data available for training!")
+            logger.error("ERROR: No data available for training!")
             return
         
         # 3. Chuẩn bị dữ liệu cho ALS
@@ -360,15 +363,15 @@ def run_training_pipeline():
         num_items = sync_item_factors_to_milvus(model, spark)
         
         # Summary
-        print("=" * 60)
-        print("TRAINING COMPLETED SUCCESSFULLY!")
-        print(f"   Users synced to MongoDB: {num_users}")
-        print(f"   Items synced to Milvus: {num_items}")
-        print(f"   Completed at: {datetime.now()}")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("TRAINING COMPLETED SUCCESSFULLY!")
+        logger.info(f"Users synced to MongoDB: {num_users}")
+        logger.info(f"Items synced to Milvus: {num_items}")
+        logger.info(f"Completed at: {datetime.now()}")
+        logger.info("=" * 60)
         
     except Exception as e:
-        print(f"TRAINING FAILED: {e}")
+        logger.error(f"TRAINING FAILED: {e}")
         raise e
     finally:
         spark.stop()
