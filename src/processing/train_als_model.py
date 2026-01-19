@@ -25,42 +25,45 @@ from pymilvus import (
 )
 
 # ============================================================
-# CONFIGURATION
+# IMPORT CENTRALIZED CONFIG
 # ============================================================
-SPARK_PACKAGES = [
-    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
-    "org.apache.hadoop:hadoop-aws:3.3.4",
-]
+import src.config as cfg
 
-# ALS Hyperparameters
-ALS_RANK = 64           # Số chiều của latent vector
-ALS_MAX_ITER = 15       # Số vòng lặp
-ALS_REG_PARAM = 0.1     # Regularization
-ALS_ALPHA = 40.0        # Confidence scaling (Implicit Feedback)
+# ALS Hyperparameters (từ config tập trung)
+ALS_RANK = cfg.ALS_RANK
+ALS_MAX_ITER = cfg.ALS_MAX_ITER
+ALS_REG_PARAM = cfg.ALS_REG_PARAM
+ALS_ALPHA = cfg.ALS_ALPHA
+SLIDING_WINDOW_DAYS = cfg.SLIDING_WINDOW_DAYS
 
-# Sliding Window (90 days)
-SLIDING_WINDOW_DAYS = 90
-
-# Connection configs
-MINIO_ENDPOINT = "http://minio:9000"
-MINIO_ACCESS_KEY = "minioadmin"
-MINIO_SECRET_KEY = "minioadmin"
-MONGODB_URI = "mongodb://mongodb:27017"
-MILVUS_HOST = "milvus"
-MILVUS_PORT = 19530
+# Connection configs (từ config tập trung)
+MINIO_ENDPOINT = cfg.MINIO_ENDPOINT
+MINIO_ACCESS_KEY = cfg.MINIO_ACCESS_KEY
+MINIO_SECRET_KEY = cfg.MINIO_SECRET_KEY
+MONGODB_URI = cfg.MONGO_URI
+MILVUS_HOST = cfg.MILVUS_HOST
+MILVUS_PORT = cfg.MILVUS_PORT
 
 # Collection names
-MILVUS_COLLECTION = "music_collection"
-MONGO_DB = "music_recsys"
-MONGO_USERS_COLLECTION = "users"
+MILVUS_COLLECTION = cfg.MILVUS_COLLECTION
+MONGO_DB = cfg.MONGO_DB
+MONGO_USERS_COLLECTION = cfg.COLLECTION_USERS
+
+# MinIO Data Path
+MINIO_RAW_PATH = cfg.MINIO_RAW_MUSIC_LOGS_PATH
 
 
 def create_spark_session():
-    """Khởi tạo Spark Session với các configs cần thiết."""
+    """Khởi tạo Spark Session với các configs cần thiết.
+    
+    NOTE: Không cần spark.jars.packages vì Docker image đã tích hợp sẵn:
+      - hadoop-aws-3.3.4.jar
+      - mongo-spark-connector_2.12-10.3.0.jar
+      - spark-sql-kafka-0-10_2.12-3.5.0.jar
+    """
     return SparkSession.builder \
         .appName("ALS_Batch_Training") \
         .master("spark://spark-master:7077") \
-        .config("spark.jars.packages", ",".join(SPARK_PACKAGES)) \
         .config("spark.executor.memory", "2g") \
         .config("spark.executor.cores", "2") \
         .config("spark.cores.max", "4") \
@@ -84,8 +87,8 @@ def load_training_data(spark, days=SLIDING_WINDOW_DAYS):
     cutoff_str = cutoff_date.strftime("%Y-%m-%d")
     
     try:
-        # Đọc toàn bộ Parquet từ MinIO
-        df = spark.read.parquet("s3a://datalake/raw/music_logs/")
+        # Đọc toàn bộ Parquet từ MinIO (path từ config tập trung)
+        df = spark.read.parquet(MINIO_RAW_PATH)
         
         # Filter theo timestamp (Sliding Window)
         df_filtered = df.filter(col("date_str") >= cutoff_str)
@@ -275,7 +278,7 @@ def sync_item_factors_to_milvus(model, spark):
     # Cần mapping item_index -> track_id (từ data gốc)
     # Đọc lại data để lấy mapping
     try:
-        df = spark.read.parquet("s3a://datalake/raw/music_logs/")
+        df = spark.read.parquet(MINIO_RAW_PATH)
         track_mapping = df.select("track_index", "musicbrainz_track_id").distinct()
         
         # Join để có track_id

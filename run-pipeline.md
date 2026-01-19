@@ -176,39 +176,68 @@ docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --pa
 
 ---
 
-## BƯỚC 5: Chạy Producer TURBO (Terminal 2)
+## BƯỚC 5: Chạy Producer (Terminal 2)
 
-**Mở Terminal mới** và chạy:
+**Mở Terminal mới** và chọn 1 trong 3 mode:
+
+### 🎯 Option A: BALANCED Mode (Khuyến nghị)
+
+```bash
+docker exec -it spark-master python3 /opt/src/ingestion/producer_balanced.py
+```
+
+> ⚖️ **BALANCED Mode**: Cân bằng giữa tốc độ và tính realtime
+> - Giữ timestamp gốc (quan trọng cho time-series analytics)
+> - Tăng tốc x1000 (1 giờ data = 3.6 giây thực)
+> - Nhảy qua khoảng trống > 5 phút
+> - Tốc độ: ~1,000-5,000 msg/s
+
+**Output mong đợi:**
+
+```
+⚡ BALANCED MODE: x1000.0 speed, batch 500
+   Skip gaps > 5 minutes
+📖 Đọc file: part-00000-xxx.parquet
+📊 Sent: 5,000 | Rate: 2,345 msg/s | Elapsed: 2.1s
+⏩ Skip gap 45.2 phút
+📊 Sent: 10,000 | Rate: 2,100 msg/s | Elapsed: 4.8s
+...
+🎉 DONE: xxx messages in Xs
+```
+
+### ⚡ Option B: TURBO Mode (Nhanh nhất)
 
 ```bash
 docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
 ```
 
-> ⚡ **TURBO Mode**: Gửi data tốc độ TỐI ĐA (không giả lập thời gian thực), ~10,000+ msg/s
+> ⚡ **TURBO Mode**: Gửi data tốc độ TỐI ĐA
+> - Không giữ timestamp gốc (ghi đè bằng thời gian hiện tại)
+> - Không delay, không giả lập realtime
+> - Tốc độ: ~10,000+ msg/s
 
-**Output mong đợi:**
+### 🐢 Option C: Normal Mode (Realtime simulation)
 
+```bash
+docker exec -it spark-master python3 /opt/src/ingestion/producer.py
 ```
-🔧 Đang kiểm tra Topic 'music_log'...
-✅ Topic 'music_log' đã tồn tại.
-🔌 Khởi tạo Producer TURBO...
-🚀 TURBO MODE: Đọc X files với tốc độ TỐI ĐA!
 
-📖 Đọc file: part-00000-xxx.parquet
-⚡ Sent: 50,000 | Rate: 12,345 msg/s | Elapsed: 4.1s
-⚡ Sent: 100,000 | Rate: 11,892 msg/s | Elapsed: 8.4s
-...
-🎉 DONE: xxx messages in Xs (xxx msg/s)
-```
+> 🐢 **Normal Mode**: Giả lập thời gian thực
+> - Giữ timestamp gốc
+> - Chậm, phù hợp demo realtime
+> - Tốc độ: ~5 msg/s (với x200 speed factor)
+
+---
+
+### 📊 So sánh 3 modes:
+
+| Mode | Tốc độ | Thời gian 1M msg | Giữ timestamp | Use case |
+|------|--------|------------------|---------------|----------|
+| **producer.py** | ~5 msg/s | ~55 giờ | ✅ | Demo realtime |
+| **producer_balanced.py** ⭐ | ~2,000 msg/s | ~8 phút | ✅ | **Dev/Test** |
+| **producer_turbo.py** | ~10,000+ msg/s | ~2 phút | ❌ | Load data nhanh |
 
 **Đợi Producer chạy xong** hoặc nhấn `Ctrl+C` khi đủ data.
-
-### 📊 So sánh tốc độ:
-
-| Mode | Tốc độ | Thời gian cho 1M messages |
-|------|--------|---------------------------|
-| **producer.py** (cũ) | ~1-5 msg/s | ~50+ giờ |
-| **producer_turbo.py** (mới) | ~10,000+ msg/s | ~2 phút |
 
 ---
 
@@ -420,6 +449,7 @@ docker-compose restart milvus-standalone
 | Processing Trigger | `stream_to_minio.py`                           | `1 minute`                  |
 | Processing Trigger | `stream_to_minio_turbo.py` ⚡                  | `10 seconds`                |
 | Producer Speed     | `producer.py`                                  | `x200` (realtime simulation)|
+| Producer Speed     | `producer_balanced.py` ⭐                      | `x1000` (fast + timestamp)  |
 | Producer Speed     | `producer_turbo.py` ⚡                         | `MAX` (no delay)            |
 | **ALS Rank**       | `train_als_model.py`                           | `64` (vector dimension)     |
 | **Sliding Window** | `train_als_model.py`                           | `90 days`                   |
@@ -530,7 +560,8 @@ music-recsys/
 │   │   ├── fix_format.py       # Clean data
 │   │   └── etl_sort.py         # Sort theo timestamp
 │   ├── ingestion/
-│   │   ├── producer.py         # Gửi data vào Kafka (chậm, simulate realtime)
+│   │   ├── producer.py         # 🐢 Gửi data (chậm, simulate realtime x200)
+│   │   ├── producer_balanced.py # ⭐ Cân bằng speed/realtime (x1000)
 │   │   ├── producer_turbo.py   # ⚡ Gửi data tốc độ MAX
 │   │   ├── stream_to_minio.py  # Spark Streaming: Kafka → MinIO (1 min trigger)
 │   │   └── stream_to_minio_turbo.py  # ⚡ Turbo mode (10s trigger)
@@ -563,7 +594,7 @@ Sau khi chạy xong toàn bộ pipeline:
 
 ---
 
-## ⚡ Quick Start (TURBO Mode)
+## ⚡ Quick Start (Khuyến nghị)
 
 Nếu bạn đã có data trong `data/processed_sorted/`, chạy nhanh:
 
@@ -571,8 +602,11 @@ Nếu bạn đã có data trong `data/processed_sorted/`, chạy nhanh:
 # Terminal 1: Streaming
 docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio_turbo.py"
 
-# Terminal 2: Producer (mở terminal mới)
-docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
+# Terminal 2: Producer BALANCED (mở terminal mới) - ⭐ Khuyến nghị
+docker exec -it spark-master python3 /opt/src/ingestion/producer_balanced.py
+
+# Hoặc dùng TURBO nếu muốn nhanh nhất (không giữ timestamp gốc):
+# docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
 
 # Sau khi xong, Ctrl+C cả 2 terminal, restart spark rồi chạy:
 docker restart spark-master spark-worker
@@ -584,3 +618,4 @@ docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafk
 
 docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 /opt/src/processing/train_als_model.py
 ```
+

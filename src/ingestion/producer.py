@@ -1,149 +1,204 @@
 import json
-import socket
 import time
-import sys
+import socket
 from datetime import datetime
-import pyarrow.parquet as pq
 from pathlib import Path
-# Thêm AdminClient và NewTopic
-from confluent_kafka import Producer
-from confluent_kafka.admin import AdminClient, NewTopic 
+import pyarrow.parquet as pq
+from confluent_kafka import Producer #type: ignore
+from confluent_kafka.admin import AdminClient, NewTopic #type: ignore 
+import src.config as cfg
+from src.utils import get_logger
 
-# ================= CẤU HÌNH TỐC ĐỘ =================
-SPEED_FACTOR = 200.0  # Tốc độ nhanh hơn thời gian thực gấp bao nhiêu lần
-MAX_SLEEP_SEC = 2.0   
+logger = get_logger("Kafka_Producer")
 
-# ================= CẤU HÌNH KAFKA =================
-CONF = {
-    'bootstrap.servers': 'kafka:9092',
-    'client.id': socket.gethostname(),
-    'acks': '1',
-    'linger.ms': 5,
-    'batch.size': 16384,
-    'compression.type': 'gzip',
-}
+# ================= CLASS 1: QUẢN LÝ KAFKA (HẠ TẦNG) =================
+class KafkaService:
+    def __init__(self):
+        self.conf = {
+            'bootstrap.servers': cfg.KAFKA_BOOTSTRAP_SERVERS,
+            'client.id': socket.gethostname(),
+            'acks': '1',
+            'linger.ms': 5,
+            'batch.size': 16384,
+            'compression.type': 'gzip',
+        }
+        self.topic = cfg.KAFKA_TOPIC
+        self.producer = Producer(self.conf)
+        self.admin = AdminClient(self.conf)
 
-TOPIC = "music_log"
-DATA_DIR = Path('/opt/data/processed_sorted')
-TIMESTAMP_COL = 'timestamp'
-NUM_PARTITIONS = 4
-REPLICATION_FACTOR = 1
-
-BATCH_SIZE = 2000  # Số bản ghi mỗi lô
-
-# ================= HÀM QUẢN LÝ TOPIC =================
-def ensure_topic_exists():
-    """Kiểm tra và tạo Topic nếu chưa có"""
-    print(f"🔧 Đang kiểm tra Topic '{TOPIC}'...")
-    
-    # Tạo AdminClient (dùng chung config với Producer)
-    admin_client = AdminClient({'bootstrap.servers': CONF['bootstrap.servers']})
-    
-    # Lấy danh sách topic hiện có
-    cluster_metadata = admin_client.list_topics(timeout=10)
-    
-    if TOPIC in cluster_metadata.topics:
-        print(f" Topic '{TOPIC}' đã tồn tại.")
-    else:
-        print(f" Topic chưa có. Đang tạo mới với {NUM_PARTITIONS} partitions...")
-        # Định nghĩa topic mới
-        new_topic = NewTopic(
-            topic=TOPIC, 
-            num_partitions=NUM_PARTITIONS, 
-            replication_factor=REPLICATION_FACTOR
-        )
-        # Gửi lệnh tạo
-        fs = admin_client.create_topics([new_topic])
+    def ensure_topic_exists(self, num_partitions=None, replication_factor=None):
+        """Kiểm tra và tạo Topic nếu chưa có"""
+        # Sử dụng cấu hình từ file configs nếu không truyền vào
+        if num_partitions is None:
+            num_partitions = cfg.KAFKA_NUM_PARTITIONS
+        if replication_factor is None:
+            replication_factor = cfg.KAFKA_REPLICATION_FACTOR
         
-        # Chờ kết quả
-        for topic, future in fs.items():
-            try:
-                future.result()  # Block chờ tạo xong
-                print(f" Đã tạo thành công topic: {topic}")
-            except Exception as e:
-                print(f" Không thể tạo topic {topic}: {e}")
+        # Kiểm tra tồn tại Topic
+        logger.info(f"Đang kiểm tra Topic '{self.topic}'...")
+        metadata = self.admin.list_topics(timeout=10)
 
-# ================= GENERATOR =================
-def source_data_generator(data_dir, skip_time=True):
-    files = sorted([f for f in data_dir.glob("*.parquet") if f.is_file() and not f.name.startswith('.')])
-    if not files:
-        print(" Không tìm thấy file.")
-        return
-
-    first_data_ts = None # Thời gian dữ liệu đầu tiên
-    wall_clock_start = None # Thời gian thực khi bắt đầu
-    time_skip_accumulation = 0 # Tổng thời gian nhảy cóc
-
-    print(f" Bắt đầu Replay với tốc độ: x{SPEED_FACTOR}")
-    
-    for file_path in files:
-        print(f"\n Đọc file: {file_path.name}")
-        parquet_file = pq.ParquetFile(file_path)
-
-        for batch in parquet_file.iter_batches(batch_size=BATCH_SIZE):
-            records = batch.to_pylist()
-            for record in records:
-                original_ts_str = record.get(TIMESTAMP_COL)
-                if not original_ts_str: continue
+        if self.topic in metadata.topics:
+            logger.info(f"Topic '{self.topic}' đã tồn tại.")
+        else:
+            logger.warning(f"Topic chưa có. Đang tạo mới...")
+            new_topic = NewTopic(self.topic, num_partitions, replication_factor)
+            fs = self.admin.create_topics([new_topic])
+            for topic, future in fs.items():
                 try:
-                    if isinstance(original_ts_str, str):
-                        current_data_ts = datetime.fromisoformat(original_ts_str)
-                    else:
-                        current_data_ts = original_ts_str
-                except ValueError: continue
+                    future.result()
+                    logger.info(f" Đã tạo thành công topic: {topic}")
+                except Exception as e:
+                    logger.error(f" Không thể tạo topic {topic}: {e}")
 
-                if first_data_ts is None:
-                    first_data_ts = current_data_ts
-                    wall_clock_start = time.time()
-
-                elapsed_seconds_ts = (current_data_ts - first_data_ts).total_seconds()
-                real_elapsed_ts = elapsed_seconds_ts / SPEED_FACTOR
-                real_elapsed_ts -= time_skip_accumulation
-                target_wall_time = wall_clock_start + real_elapsed_ts #type: ignore
-                sleep_duration = target_wall_time - time.time()
-
-                if sleep_duration > 0:
-                    if sleep_duration > MAX_SLEEP_SEC and skip_time:
-                        skip_amount = sleep_duration - MAX_SLEEP_SEC
-                        time_skip_accumulation += skip_amount
-                        print(f"⏩ Nhảy cóc {skip_amount:.1f}s...")
-                        time.sleep(MAX_SLEEP_SEC)
-                    else:
-                        time.sleep(sleep_duration)
-
-                record[TIMESTAMP_COL] = datetime.now().isoformat()
-                yield record
-
-# ================= MAIN =================
-def delivery_report(err, msg):
-    if err is not None: print(f' Lỗi: {err}')
-
-def run_producer():
-    # 1. KIỂM TRA TOPIC TRƯỚC KHI CHẠY
-    ensure_topic_exists()
-    
-    # 2. KHỞI TẠO PRODUCER
-    print("🔌 Khởi tạo Producer...")
-    producer = Producer(CONF)
-    
-    data_stream = source_data_generator(DATA_DIR, skip_time=False)
-    total_sent = 0
-
-    try:
-        for record in data_stream:
+    def send_message(self, record):
+        """Gửi 1 bản ghi vào Kafka"""
+        try:
             msg_value = json.dumps(record, default=str).encode('utf-8')
-            producer.produce(TOPIC, value=msg_value, callback=delivery_report)
-            producer.poll(0)
-            total_sent += 1
-            if total_sent % 100 == 0:
-                print(f" Sent: {total_sent} | Time: {record[TIMESTAMP_COL]}", end='\r')
+            self.producer.produce(self.topic, value=msg_value)
+            self.producer.poll(0)
+        except BufferError:
+            logger.warning(" Hàng đợi đầy, đang chờ xả bớt...")
+            self.producer.poll(1) # Chờ 1s để giải phóng bộ đệm
+
+    def close(self):
+        logger.info("🔌 Đang đóng Producer...")
+        self.producer.flush(10)
+
+# ================= TRÌNH TẠO LOG NGƯỜI DÙNG =================
+class MusicStreamPlayer:
+    def __init__(self, data_dir, speed_factor=200.0, max_sleep_sec=2.0):
+        self.data_dir = Path(data_dir)
+        self.speed_factor = speed_factor
+        self.max_sleep_sec = max_sleep_sec
+        # State variables
+        self.first_data_ts = None
+        self.wall_clock_start = None
+        self.time_skip_accumulation = 0
+
+    def stream_records(self):
+        """Generator trả về từng dòng dữ liệu đã được căn chỉnh thời gian"""
+        # Sử dụng config đường dẫn từ file Config (cần bỏ prefix file:// nếu có)
+        clean_path = str(self.data_dir).replace("file://", "")
+        path_obj = Path(clean_path)
         
-        producer.flush(10)
-        print(f"\n DONE: {total_sent}")
+        files = sorted([f for f in path_obj.glob("*.parquet") if f.is_file() and not f.name.startswith('.')])
+        
+        if not files:
+            logger.error(f"Không tìm thấy file parquet nào tại: {clean_path}")
+            return
+
+        logger.info(f"Bắt đầu Replay {len(files)} file với tốc độ: x{self.speed_factor}")
+        
+        for file_path in files:
+            logger.info(f"📖 Đang đọc file: {file_path.name}")
+            try:
+                pf = pq.ParquetFile(file_path)
+            except Exception as e:
+                logger.error(f"Lỗi đọc file {file_path.name}: {e}")
+                continue
+
+            for batch in pf.iter_batches(batch_size=2000):
+                records = batch.to_pylist()
+                for record in records:
+                    yield self._process_time_travel(record)
+
+    def _process_time_travel(self, record):
+        """Xử lý logic Time Travel phức tạp tách riêng ra đây"""
+        ts_val = record.get('timestamp')
+        if not ts_val: return record
+
+        # Parse timestamp
+        try:
+            current_data_ts = datetime.fromisoformat(ts_val) if isinstance(ts_val, str) else ts_val
+        except ValueError:
+            return record
+
+        # Init mốc thời gian
+        if self.first_data_ts is None:
+            self.first_data_ts = current_data_ts
+            self.wall_clock_start = time.time()
+
+        # Tính toán độ trễ
+        elapsed_seconds = (current_data_ts - self.first_data_ts).total_seconds()
+        real_elapsed = (elapsed_seconds / self.speed_factor) - self.time_skip_accumulation
+        target_time = self.wall_clock_start + real_elapsed #type: ignore
+        
+        sleep_duration = target_time - time.time()
+
+        if sleep_duration > 0:
+            if sleep_duration > self.max_sleep_sec:
+                skip = sleep_duration - self.max_sleep_sec
+                self.time_skip_accumulation += skip
+                logger.info(f"Nhảy cóc {skip:.1f}s ...")
+                time.sleep(self.max_sleep_sec)
+            else:
+                time.sleep(sleep_duration)
+
+        record['timestamp'] = datetime.now().isoformat()
+        return record
+
+# ================= MAIN PROGRAM =================
+def run():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Kafka Music Log Producer")
+    parser.add_argument("--boost", action="store_true", help="Chế độ nhanh hơn một chút (500x)")
+    parser.add_argument("--fast", action="store_true", help="Chế độ nhanh (2000x speed)")
+    parser.add_argument("--turbo", action="store_true", help="Chế độ MAX speed (không delay)")
+    parser.add_argument("--speed", type=float, default=200.0, help="Tốc độ tùy chỉnh (mặc định: 200x)")
+    args = parser.parse_args()
+    
+    # Xác định speed_factor
+    if args.turbo:
+        speed_factor = float('inf')  # Không delay
+        mode_name = "TURBO (MAX)"
+    elif args.fast:
+        speed_factor = 2000.0  # Nhanh
+        mode_name = "FAST (2000x)"
+    elif args.boost:
+        speed_factor = 500.0  # Nhanh hơn một chút
+        mode_name = "BOOST (500x)"
+    else:
+        speed_factor = args.speed
+        mode_name = f"REALTIME ({speed_factor}x)"
+    
+    logger.info(f" Chế độ: {mode_name}")
+    
+    # 1. Khởi tạo Service
+    kafka_svc = KafkaService()
+    kafka_svc.ensure_topic_exists()
+
+    # 2. Khởi tạo Player
+    player = MusicStreamPlayer(
+        data_dir=cfg.MUSIC_LOGS_DATA_PATH,
+        speed_factor=speed_factor
+    )
+
+    # 3. Chạy vòng lặp chính
+    total_sent = 0
+    start_time = time.time()
+    
+    try:
+        for record in player.stream_records():
+            if record:
+                kafka_svc.send_message(record)
+                total_sent += 1
+                if total_sent % 1000 == 0:
+                    elapsed = time.time() - start_time
+                    rate = total_sent / elapsed if elapsed > 0 else 0
+                    print(f"Sent: {total_sent:,} records | Speed: {rate:.0f} msg/s", end='\r')
+        
+        elapsed = time.time() - start_time
+        rate = total_sent / elapsed if elapsed > 0 else 0
+        print(f"\nHOÀN TẤT! Tổng: {total_sent:,} | Thời gian: {elapsed:.1f}s | Tốc độ: {rate:.0f} msg/s")
+
     except KeyboardInterrupt:
-        print("\n Stopped.")
+        logger.info("\nDừng chương trình theo yêu cầu.")
     except Exception as e:
-        print(f"\n Error: {e}")
+        logger.error(f"Lỗi không mong muốn: {e}")
+    finally:
+        kafka_svc.close()
 
 if __name__ == "__main__":
-    run_producer()
+    run()
