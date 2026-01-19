@@ -83,11 +83,8 @@ def sync_data():
     print("🔌 Đang kết nối MongoDB...", end=" ", flush=True)
     try:
         client = MongoClient(MONGO_URI)
-        # Sử dụng w=0 để Fire-and-Forget (Ghi không cần chờ xác nhận) -> Tốc độ tối đa
-        # Nhưng để an toàn ta dùng mặc định (w=1)
         db = client[DB_NAME]
         col = db[COLLECTION_NAME]
-        # Test kết nối nhẹ cái
         client.admin.command('ping')
         print("✅ OK!", flush=True)
     except Exception as e:
@@ -99,7 +96,7 @@ def sync_data():
         print(f"⚠️ Thư mục {DATA_DIR} không tồn tại.", flush=True)
         return
 
-    json_files = list(DATA_DIR.glob("part-*.json"))
+    json_files = list(DATA_DIR.glob("*.json"))
     if not json_files:
         print("⚠️ Không tìm thấy file dữ liệu.", flush=True)
         return
@@ -114,9 +111,9 @@ def sync_data():
     operations = []
 
     ALLOWED_FIELDS = {
-        "track_name", 
-        "artist_name", 
-        "musicbrainz_artist_id", # Giữ lại nếu muốn làm trang profile nghệ sĩ
+        "title", 
+        "artist", 
+        "artist_id", # Giữ lại nếu muốn làm trang profile nghệ sĩ
     }
     
     for file_path in json_files:
@@ -157,6 +154,18 @@ def sync_data():
     print("\n") # Xuống dòng sau khi thanh bar chạy xong
     print("-------------------------------------------------------", flush=True)
     print(f"✅ [SYNC] HOÀN TẤT! Tổng đã xử lý: {pbar.current}", flush=True)
+    print("🏗️  Đang kiểm tra và khởi tạo Index cho tìm kiếm...", end=" ", flush=True)
+    try:
+        # Tạo Text Index cho title và artist để MusicService.search_songs hoạt động
+        # Background=True giúp việc tạo index không làm khóa (lock) database
+        col.create_index(
+            [("title", "text"), ("artist", "text")],
+            name="SongSearchIndex",
+            background=True 
+        )
+        print("✅ XONG!", flush=True)
+    except Exception as e:
+        print(f"⚠️ Cảnh báo lỗi Index: {e}", flush=True)
 
 if __name__ == "__main__":
     sync_data()

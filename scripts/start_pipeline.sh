@@ -28,7 +28,7 @@ echo "🔥 [3/3] Khởi động Spark Streaming (Background)..."
   --master spark://spark-master:7077 \
   --deploy-mode client \
   --total-executor-cores 1 \
-  --executor-memory 512m \
+  /opt/src/pipelines/ingestion/kafka_to_minio.py &
 
 # ---------------------------------------------------------------
 # BƯỚC 4: "KHÓA" SCRIPT LẠI BẰNG PRODUCER

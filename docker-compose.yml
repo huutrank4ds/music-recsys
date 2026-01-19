@@ -151,39 +151,50 @@ services:
   # 6. JOBS & APPS (Đổi tên & Thêm mới)
   # -----------------------------------------------------------
   # [JOB] Service đồng bộ Master Data vào MongoDB hàng ngày
-  # job-sync-master:
-  #   image: my-apache-spark:3.5
-  #   container_name: job-sync-master
-  #   user: root 
-  #   depends_on:
-  #     - mongodb
-  #     - spark-master
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - PYTHONPATH=/opt
-  #   volumes:
-  #     - ./src:/opt/src
-  #     - ./data:/opt/data
-  #   command: >
-  #     /bin/bash -c "
-  #     pip install pymongo && 
-  #     while true; do 
-  #       echo '🚀 Starting Master Data Sync Job...';
-  #       if python3 -u /opt/src/pipelines/batch/import_master_songs.py; then
-  #         echo '✅ Sync Success! Sleeping for 24 hours...';
-  #         sleep 86400; 
-  #       else
-  #         echo '❌ Sync Failed! Retrying in 10 seconds...';
-  #         sleep 10;
-  #       fi
-  #     done"
-  #   networks:
-  #     - bigdata-net
-
-  spark-job-runner:
+  job-sync-master:
     image: my-apache-spark:3.5
-    container_name: spark-job-runner
+    container_name: job-sync-master
+    user: root 
+    depends_on:
+      - mongodb
+      - spark-master
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/opt
+    volumes:
+      - ./src:/opt/src
+      - ./data:/opt/data
+    command: >
+      /bin/bash -c "
+        echo '🚀 Starting Master Data Sync Job...';
+        python3 -u /opt/src/pipelines/batch/import_master_songs.py;
+        echo '✅ Sync Success! Sleeping for 24 hours...';
+        "
+    networks:
+      - bigdata-net
+
+  job-producer:
+    image: my-apache-spark:3.5
+    container_name: music_log_producer
+    depends_on:
+      - kafka
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/opt
+    volumes:
+      - ./src:/opt/src
+      - ./data:/opt/data
+    # Thay đường dẫn bên dưới bằng đường dẫn thực tế tới file Python producer của bạn
+    # command: ["python3", "/opt/src/pipelines/ingestion/producer.py"] 
+    networks:
+      - bigdata-net
+    restart: on-failure
+
+  job-consumer:
+    image: my-apache-spark:3.5
+    container_name: music_spark_streaming
     depends_on:
       - kafka
       - spark-master
@@ -192,33 +203,90 @@ services:
       - .env
     environment:
       - PYTHONPATH=/opt
+      - SPARK_MASTER_URL=spark://spark-master:7077
     volumes:
       - ./src:/opt/src
+      - ./scripts:/opt/scripts
       - ./data:/opt/data
-      - ./scripts:/opt/scripts 
-    # Chạy script quản lý quy trình
-    # command: ["/bin/bash", "/opt/scripts/start_pipeline.sh"]
-    command: tail -f /dev/null
+    # command: >
+    #   /opt/spark/bin/spark-submit 
+    #   --master spark://spark-master:7077
+    #   /opt/src/pipelines/ingestion/kafka_to_minio.py
+    networks:
+      - bigdata-net
+    restart: on-failure
+
+
+
+  # [APP] Service mới cho Web/API
+  backend:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile 
+    container_name: music_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017
+      - REDIS_HOST=redis
+      - MILVUS_HOST=milvus
+      - PYTHONPATH=/app/src
+    depends_on:
+      - mongodb
+      - redis
+      - milvus
+    volumes:
+      # Map code để Hot Reload
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+    networks:
+      - music_net
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_RETENTION_RENDER_BY_HOUR=1
+      - ETCD_LOG_LEVEL=warn
+    volumes:
+      - etcd_data:/bitnami/etcd/data
+    networks:
+      - bigdata-net
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  milvus:
+    image: milvusdb/milvus:v2.3.15
+    container_name: milvus-standalone
+    ports:
+      - "19530:19530"
+    environment:
+      - ETCD_ENDPOINTS=etcd:2379
+      - MINIO_ADDRESS=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+    env_file:
+      - .env
+    depends_on:
+      - minio
+      - etcd
+    command: ["milvus", "run", "standalone"]
+    volumes:
+      - milvus_data:/var/lib/milvus
     networks:
       - bigdata-net
 
-  # [APP] Service mới cho Web/API
-  web-app:
-    image: my-apache-spark:3.5
-    container_name: music-web-app
+  redis:
+    image: redis:7.2-alpine
+    container_name: music_recsys_redis
     ports:
-      - "${WEB_APP_PORT}:8000"
-    depends_on:
-      - mongodb
-    env_file:
-      - .env
+      - "6379:6379"
     volumes:
-      - ./src:/opt/src
-    # Cài thư viện và chạy Uvicorn
-    command: >
-      /bin/bash -c "
-      uvicorn src.app.main:app --host 0.0.0.0 --port 8000 --reload
-      "
+      - redis_data:/data
+    command: redis-server --appendonly yes
     networks:
       - bigdata-net
 
@@ -231,3 +299,6 @@ volumes:
   mongo_data:
   kafka_data:
   minio_data:
+  etcd_data:
+  milvus_data:
+  redis_data:

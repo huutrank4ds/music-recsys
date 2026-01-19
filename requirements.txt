@@ -15,3 +15,7 @@ python-multipart
 
 # --- Configuration ---
 python-dotenv
+
+# --- Machine Learning & Recommender System ---
+numpy
+pymilvus
