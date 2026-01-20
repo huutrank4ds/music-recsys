@@ -159,7 +159,7 @@ docker exec spark-master ls -lh /opt/data/processed_sorted/
 **Mở Terminal mới** và chạy:
 
 ```bash
-docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio_turbo.py"
+docker exec -it spark-master bash -c "cd /opt/src/pipelines/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio_turbo.py"
 ```
 
 > ⚡ **TURBO Mode**: Trigger mỗi 10 giây (thay vì 1 phút), fetch size lớn hơn, tối ưu S3A upload.
@@ -183,7 +183,7 @@ docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --pa
 ### 🎯 Option A: BALANCED Mode (Khuyến nghị)
 
 ```bash
-docker exec -it spark-master python3 /opt/src/ingestion/producer_balanced.py
+docker exec -it spark-master python3 /opt/src/pipelines/ingestion/producer_balanced.py
 ```
 
 > ⚖️ **BALANCED Mode**: Cân bằng giữa tốc độ và tính realtime
@@ -208,7 +208,7 @@ docker exec -it spark-master python3 /opt/src/ingestion/producer_balanced.py
 ### ⚡ Option B: TURBO Mode (Nhanh nhất)
 
 ```bash
-docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
+docker exec -it spark-master python3 /opt/src/pipelines/ingestion/producer_turbo.py
 ```
 
 > ⚡ **TURBO Mode**: Gửi data tốc độ TỐI ĐA
@@ -219,7 +219,7 @@ docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
 ### 🐢 Option C: Normal Mode (Realtime simulation)
 
 ```bash
-docker exec -it spark-master python3 /opt/src/ingestion/producer.py
+docker exec -it spark-master python3 /opt/src/pipelines/ingestion/producer.py
 ```
 
 > 🐢 **Normal Mode**: Giả lập thời gian thực
@@ -271,7 +271,7 @@ docker restart spark-master spark-worker
 **Chạy ETL Master Data:**
 
 ```bash
-docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/processing/etl_master_data.py
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/pipelines/batch/etl_master_data.py
 ```
 
 **Output mong đợi:**
@@ -289,7 +289,7 @@ THÀNH CÔNG! Đã lưu xxx bài hát vào MongoDB.
 ## BƯỚC 8: ETL Users (MinIO → MongoDB users)
 
 ```bash
-docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/processing/etl_users.py
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/pipelines/batch/etl_users.py
 ```
 
 **Output mong đợi:**
@@ -309,7 +309,7 @@ docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafk
 **Chạy Training:**
 
 ```bash
-docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 /opt/src/processing/train_als_model.py
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 /opt/src/pipelines/batch/train_als_model.py
 ```
 
 **Output mong đợi:**
@@ -559,16 +559,17 @@ music-recsys/
 │   │   ├── download_data.py    # Download từ HuggingFace
 │   │   ├── fix_format.py       # Clean data
 │   │   └── etl_sort.py         # Sort theo timestamp
-│   ├── ingestion/
-│   │   ├── producer.py         # 🐢 Gửi data (chậm, simulate realtime x200)
-│   │   ├── producer_balanced.py # ⭐ Cân bằng speed/realtime (x1000)
-│   │   ├── producer_turbo.py   # ⚡ Gửi data tốc độ MAX
-│   │   ├── stream_to_minio.py  # Spark Streaming: Kafka → MinIO (1 min trigger)
-│   │   └── stream_to_minio_turbo.py  # ⚡ Turbo mode (10s trigger)
-│   └── processing/
-│       ├── etl_master_data.py  # ETL: MinIO → MongoDB (songs)
-│       ├── etl_users.py        # ETL: MinIO → MongoDB (users)
-│       └── train_als_model.py  # ALS Training → MongoDB + Milvus
+│   └── pipelines/
+│       ├── ingestion/
+│       │   ├── producer.py         # 🐢 Gửi data (chậm, simulate realtime x200)
+│       │   ├── producer_balanced.py # ⭐ Cân bằng speed/realtime (x1000)
+│       │   ├── producer_turbo.py   # ⚡ Gửi data tốc độ MAX
+│       │   ├── stream_to_minio.py  # Spark Streaming: Kafka → MinIO (1 min trigger)
+│       │   └── stream_to_minio_turbo.py  # ⚡ Turbo mode (10s trigger)
+│       └── batch/
+│           ├── etl_master_data.py  # ETL: MinIO → MongoDB (songs)
+│           ├── etl_users.py        # ETL: MinIO → MongoDB (users)
+│           └── train_als_model.py  # ALS Training → MongoDB + Milvus
 ├── docker-compose.yml
 ├── spark.Dockerfile
 ├── .env
@@ -600,22 +601,22 @@ Nếu bạn đã có data trong `data/processed_sorted/`, chạy nhanh:
 
 ```bash
 # Terminal 1: Streaming
-docker exec -it spark-master bash -c "cd /opt/src/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio_turbo.py"
+docker exec -it spark-master bash -c "cd /opt/src/pipelines/ingestion && spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 stream_to_minio_turbo.py"
 
 # Terminal 2: Producer BALANCED (mở terminal mới) - ⭐ Khuyến nghị
-docker exec -it spark-master python3 /opt/src/ingestion/producer_balanced.py
+docker exec -it spark-master python3 /opt/src/pipelines/ingestion/producer_balanced.py
 
 # Hoặc dùng TURBO nếu muốn nhanh nhất (không giữ timestamp gốc):
-# docker exec -it spark-master python3 /opt/src/ingestion/producer_turbo.py
+# docker exec -it spark-master python3 /opt/src/pipelines/ingestion/producer_turbo.py
 
 # Sau khi xong, Ctrl+C cả 2 terminal, restart spark rồi chạy:
 docker restart spark-master spark-worker
 
 # ETL + Training (chờ 15-20s sau restart)
-docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/processing/etl_master_data.py
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/pipelines/batch/etl_master_data.py
 
-docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/processing/etl_users.py
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4,org.mongodb.spark:mongo-spark-connector_2.12:10.3.0 /opt/src/pipelines/batch/etl_users.py
 
-docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 /opt/src/processing/train_als_model.py
+docker exec spark-master spark-submit --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,org.apache.hadoop:hadoop-aws:3.3.4 /opt/src/pipelines/batch/train_als_model.py
 ```
 
