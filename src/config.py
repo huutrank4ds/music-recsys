@@ -40,3 +40,24 @@ MINIO_RAW_MUSIC_LOGS_PATH = os.getenv("MINIO_RAW_MUSIC_LOGS_PATH", f"s3a://{DATA
 
 # Đường dẫn dữ liệu logs đã xử lý
 MUSIC_LOGS_DATA_PATH = os.getenv("MUSIC_LOGS_DATA_PATH", "/opt/data/processed_sorted")
+
+# ==========================================
+# 5. MILVUS CONFIGURATIONS
+# ==========================================
+MILVUS_HOST = os.getenv("MILVUS_HOST", "milvus")
+MILVUS_PORT = int(os.getenv("MILVUS_PORT", "19530"))
+MILVUS_COLLECTION = os.getenv("MILVUS_COLLECTION", "music_collection")
+
+# ==========================================
+# 6. ALS MODEL HYPERPARAMETERS
+# ==========================================
+ALS_RANK = int(os.getenv("ALS_RANK", "64"))           # Số chiều của latent vector
+ALS_MAX_ITER = int(os.getenv("ALS_MAX_ITER", "15"))   # Số vòng lặp
+ALS_REG_PARAM = float(os.getenv("ALS_REG_PARAM", "0.1"))  # Regularization
+ALS_ALPHA = float(os.getenv("ALS_ALPHA", "40.0"))     # Confidence scaling (Implicit)
+SLIDING_WINDOW_DAYS = int(os.getenv("SLIDING_WINDOW_DAYS", "90"))  # Ngày dữ liệu
+
+# ==========================================
+# 7. COLLECTION NAMES
+# ==========================================
+COLLECTION_USERS = os.getenv("COLLECTION_USERS", "users")

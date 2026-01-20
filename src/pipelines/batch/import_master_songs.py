@@ -2,7 +2,7 @@ import json
 import time
 from pathlib import Path
 from pymongo import MongoClient, UpdateOne #type: ignore
-import src.configs as cfg
+import src.config as cfg
 
 # ================= CẤU HÌNH =================
 MONGO_URI = cfg.MONGO_URI
@@ -46,12 +46,12 @@ class DockerProgressBar:
         else:
             bar = "-" * (filled_length - 1) + ">" + " " * (bar_length - filled_length)
         eta_str = time.strftime("%M:%S", time.gmtime(eta))
-        print(f"\r🚀 {self.desc}: |{bar}| {percent:.1%} [{self.current}/{self.total}] "
+        print(f"\r{self.desc}: |{bar}| {percent:.1%} [{self.current}/{self.total}] "
               f"Speed: {speed:.0f}/s | ETA: {eta_str}", end="", flush=True)
 
 # ================= HÀM ƯỚC LƯỢNG =================
 def estimate_total_lines(files):
-    print("📊 Đang ước lượng khối lượng dữ liệu...", flush=True)
+    print("Đang ước lượng khối lượng dữ liệu...", flush=True)
     total_bytes = sum(f.stat().st_size for f in files)
     if total_bytes == 0: return 0
 
@@ -77,35 +77,35 @@ def estimate_total_lines(files):
 # ================= HÀM CHÍNH =================
 def sync_data():
     current_time_str = time.strftime('%Y-%m-%d %H:%M:%S')
-    print(f"⏳ [SYNC] Bắt đầu lúc {current_time_str}", flush=True)
+    print(f"[SYNC] Bắt đầu lúc {current_time_str}", flush=True)
 
     # 1. Kết nối Mongo
-    print("🔌 Đang kết nối MongoDB...", end=" ", flush=True)
+    print("Đang kết nối MongoDB...", end=" ", flush=True)
     try:
         client = MongoClient(MONGO_URI)
         db = client[DB_NAME]
         col = db[COLLECTION_NAME]
         client.admin.command('ping')
-        print("✅ OK!", flush=True)
+        print("OK!", flush=True)
     except Exception as e:
-        print(f"\n❌ Lỗi kết nối DB: {e}", flush=True)
+        print(f"\nLỗi kết nối DB: {e}", flush=True)
         return
 
     # 2. Tìm file
     if not DATA_DIR.exists():
-        print(f"⚠️ Thư mục {DATA_DIR} không tồn tại.", flush=True)
+        print(f"Thư mục {DATA_DIR} không tồn tại.", flush=True)
         return
 
     json_files = list(DATA_DIR.glob("*.json"))
     if not json_files:
-        print("⚠️ Không tìm thấy file dữ liệu.", flush=True)
+        print("Không tìm thấy file dữ liệu.", flush=True)
         return
 
     # Tính tổng
     total_records = estimate_total_lines(json_files)
     
     # 3. Xử lý chính
-    print(f"🔄 Bắt đầu xử lý với BATCH_SIZE={BATCH_SIZE}...", flush=True)
+    print(f"Bắt đầu xử lý với BATCH_SIZE={BATCH_SIZE}...", flush=True)
     pbar = DockerProgressBar(total=total_records, desc="Syncing", min_interval=2.0)
     
     operations = []
@@ -153,8 +153,8 @@ def sync_data():
 
     print("\n") # Xuống dòng sau khi thanh bar chạy xong
     print("-------------------------------------------------------", flush=True)
-    print(f"✅ [SYNC] HOÀN TẤT! Tổng đã xử lý: {pbar.current}", flush=True)
-    print("🏗️  Đang kiểm tra và khởi tạo Index cho tìm kiếm...", end=" ", flush=True)
+    print(f"[SYNC] HOÀN TẤT! Tổng đã xử lý: {pbar.current}", flush=True)
+    print("Đang kiểm tra và khởi tạo Index cho tìm kiếm...", end=" ", flush=True)
     try:
         # Tạo Text Index cho title và artist để MusicService.search_songs hoạt động
         # Background=True giúp việc tạo index không làm khóa (lock) database
@@ -163,9 +163,9 @@ def sync_data():
             name="SongSearchIndex",
             background=True 
         )
-        print("✅ XONG!", flush=True)
+        print("XONG!", flush=True)
     except Exception as e:
-        print(f"⚠️ Cảnh báo lỗi Index: {e}", flush=True)
+        print(f"Cảnh báo lỗi Index: {e}", flush=True)
 
 if __name__ == "__main__":
     sync_data()

@@ -1,75 +1,64 @@
-import sys
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, lit, first
-from pyspark.sql.types import StructType, StructField, StringType, LongType
+"""
+ETL Master Data - Songs Collection (MongoDB)
+=============================================
+Trích xuất danh sách bài hát từ Data Lake và lưu vào MongoDB.
+Schema: {_id, title, artist, artist_id}
+"""
 
-# Cấu hình Packages: Cần Mongo Connector và Hadoop AWS
-PACKAGES = [
-    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0",
-    "org.apache.hadoop:hadoop-aws:3.3.4",
-    "org.mongodb.spark:mongo-spark-connector_2.12:10.3.0" # Compatible with Spark 3.5
-]
+from pyspark.sql.functions import col, first
+
+# Import config và utils tập trung
+import src.config as cfg
+from src.utils import get_logger, get_spark_session
+
+# Khởi tạo logger
+logger = get_logger("ETL_Songs")
 
 def run_master_data_etl():
-    print("Bắt đầu ETL Master Data (Collection: songs)...")
+    logger.info("Bắt đầu ETL Master Data (Collection: songs)...")
     
-    # 1. Khởi tạo Spark
-    spark = SparkSession.builder \
-        .appName("ETL_Songs_Master") \
-        .master("spark://spark-master:7077") \
-        .config("spark.jars.packages", ",".join(PACKAGES)) \
-        .config("spark.executor.memory", "1g") \
-        .config("spark.executor.cores", "1") \
-        .config("spark.cores.max", "1") \
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000") \
-        .config("spark.hadoop.fs.s3a.access.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.secret.key", "minioadmin") \
-        .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-        .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-        .config("spark.mongodb.write.connection.uri", "mongodb://mongodb:27017/music_recsys.songs") \
-        .getOrCreate()
+    # 1. Khởi tạo Spark từ utils
+    spark = get_spark_session("ETL_Songs_Master")
+    spark.conf.set("spark.executor.memory", "1g")
+    spark.conf.set("spark.executor.cores", "1")
+    spark.conf.set("spark.cores.max", "1")
 
     # 2. Đọc dữ liệu từ MinIO (Data Lake)
-    # Lưu ý: Đọc toàn bộ thư mục raw để lấy tất cả bài hát từng xuất hiện
-    print(">>> Đang đọc dữ liệu từ MinIO...")
+    logger.info("Đang đọc dữ liệu từ MinIO...")
     try:
-        df = spark.read.parquet("s3a://datalake/raw/music_logs/")
+        df = spark.read.parquet(cfg.MINIO_RAW_MUSIC_LOGS_PATH)
     except Exception as e:
-        print(f"Lỗi đọc MinIO (Có thể do chưa có data): {e}")
+        logger.error(f"Lỗi đọc MinIO (Có thể do chưa có data): {e}")
         spark.stop()
         return
 
-    # 3. Transform (Chọn cột & Đổi tên)
-    # Mapping theo Schema bạn yêu cầu
+    # 3. Transform (Schema theo README mới)
+    # Mapping: {_id, title, artist, artist_id}
     songs_raw = df.select(
-        col("musicbrainz_track_id").alias("_id"),      # Khóa chính
-        col("track_name").alias("title"),              # Tên bài
-        col("artist_name").alias("artist"),            # Nghệ sĩ
-        col("track_index").cast(LongType()),           # Index (Long)
-        # Tạo URL giả lập (Vì data gốc không có URL audio)
-        lit("https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3").alias("url") 
+        col("musicbrainz_track_id").alias("_id"),        # PK: Track ID (UUID)
+        col("track_name").alias("title"),                # Tên bài hát
+        col("artist_name").alias("artist"),              # Tên nghệ sĩ
+        col("musicbrainz_artist_id").alias("artist_id"), # Mã định danh nghệ sĩ
     )
 
     # 4. Deduplicate (Lọc trùng lặp)
-    # Group by ID và lấy thông tin đầu tiên tìm thấy
-    print(">>>  Đang lọc bài hát duy nhất...")
+    logger.info("Đang lọc bài hát duy nhất...")
     songs_unique = songs_raw.groupBy("_id").agg(
         first("title").alias("title"),
         first("artist").alias("artist"),
-        first("track_index").alias("track_index"),
-        first("url").alias("url")
+        first("artist_id").alias("artist_id"),
     )
 
     # 5. Load (Ghi vào MongoDB)
-    print(">>> Đang ghi vào MongoDB...")
+    logger.info("Đang ghi vào MongoDB...")
     songs_unique.write \
         .format("mongodb") \
         .mode("overwrite") \
-        .option("database", "music_recsys") \
-        .option("collection", "songs") \
+        .option("database", cfg.MONGO_DB) \
+        .option("collection", cfg.COLLECTION_SONGS) \
         .save()
 
-    print(f"THÀNH CÔNG! Đã lưu {songs_unique.count()} bài hát vào MongoDB.")
+    logger.info(f"THÀNH CÔNG! Đã lưu {songs_unique.count()} bài hát vào MongoDB.")
     spark.stop()
 
 if __name__ == "__main__":

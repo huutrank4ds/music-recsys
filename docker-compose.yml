@@ -7,9 +7,9 @@ services:
     container_name: kafka
     hostname: kafka
     ports:
-      - "9092:9092"   # Port nội bộ cố định
+      - "9092:9092" # Port nội bộ cố định
       - "${KAFKA_PORT_EXTERNAL}:9094" # Port ngoài lấy từ .env
-    env_file: 
+    env_file:
       - .env
     environment:
       # KRaft Mode Configuration
@@ -34,7 +34,6 @@ services:
 
       KAFKA_MESSAGE_MAX_BYTES: 10485760
       KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
-      
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
       KAFKA_LOG_DIRS: /var/lib/kafka/data
     networks:

@@ -2,7 +2,7 @@ import logging
 import sys
 from pyspark.sql import SparkSession
 from pymongo import MongoClient #type: ignore
-import src.configs as cfg #type: ignore
+import src.config as cfg #type: ignore
 from minio import Minio  #type: ignore
 
 def get_logger(name):
@@ -67,10 +67,10 @@ def ensure_minio_bucket(bucket_name):
     
     try:
         if not client.bucket_exists(bucket_name):
-            logger.warning(f"⚠️ Bucket '{bucket_name}' chưa tồn tại. Đang tạo mới...")
+            logger.warning(f" Bucket '{bucket_name}' chưa tồn tại. Đang tạo mới...")
             client.make_bucket(bucket_name)
-            logger.info(f"✅ Đã tạo bucket '{bucket_name}' thành công.")
+            logger.info(f" Đã tạo bucket '{bucket_name}' thành công.")
         else:
-            logger.info(f"✅ Bucket '{bucket_name}' đã tồn tại.")
+            logger.info(f" Bucket '{bucket_name}' đã tồn tại.")
     except Exception as e:
-        logger.error(f"❌ Lỗi khi kiểm tra MinIO Bucket: {e}")
+        logger.error(f" Lỗi khi kiểm tra MinIO Bucket: {e}")

@@ -1,85 +1,98 @@
-import pyarrow.parquet as pq
-import json
-import glob
-import os
-import shutil
+from pathlib import Path
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+from pyspark.sql.types import StructType, StructField, StringType, LongType
 
-# Cấu hình
-INPUT_DIR = "/opt/data/processed_sorted"
-OUTPUT_DIR = "/opt/data/songs_master_list"
-OUTPUT_FILE = f"{OUTPUT_DIR}/songs.json"
-BATCH_SIZE = 50000  # Xử lý 50.000 dòng mỗi lần (Rất an toàn cho RAM)
+# ================= 1. HÀM TIỆN ÍCH =================
+def get_valid_parquet_files(data_dir_path):
+    """
+    Quét file parquet sử dụng pathlib
+    Input: data_dir_path (Path object hoặc string)
+    Output: List các đường dẫn định dạng URI (file://...)
+    """
+    # Chuyển đổi sang Path object nếu đầu vào là string
+    data_path = Path(data_dir_path)
+    
+    print(f"🔍 Đang quét file trong: {data_path}")
+    
+    if not data_path.exists():
+        print(f"Thư mục không tồn tại: {data_path}")
+        return []
 
+    # Sử dụng pathlib để glob và filter
+    # f.name: tên file (vd: part-0000.parquet)
+    # f.resolve(): đường dẫn tuyệt đối (vd: /opt/data/...)
+    valid_files = [
+        f"file://{f.resolve()}" 
+        for f in data_path.glob("*.parquet") 
+        if not f.name.startswith(('.', '_'))
+    ]
+    
+    # Sắp xếp để đảm bảo thứ tự đọc nhất quán
+    valid_files.sort()
+    return valid_files
+
+# ================= 2. HÀM CHÍNH =================
 def main():
-    print(f"🚀 Bắt đầu xử lý 15 triệu dòng log (Batch Size: {BATCH_SIZE})...")
+    # Sử dụng Path object cho đường dẫn đầu vào
+    BASE_DIR = Path("/opt/data/processed_sorted")
     
-    # 1. Tìm file input
-    files = glob.glob(f"{INPUT_DIR}/*.parquet")
-    if not files:
-        print("❌ Không tìm thấy file input.")
+    # Đường dẫn đầu ra Spark vẫn nên để dạng string URI chuẩn
+    OUTPUT_DIR = "file:///opt/data/songs_master_list"
+
+    input_files = get_valid_parquet_files(BASE_DIR)
+    
+    if not input_files:
+        print("Không tìm thấy file!")
         return
-    
-    # 2. Reset output
-    if os.path.exists(OUTPUT_DIR):
-        shutil.rmtree(OUTPUT_DIR)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # 3. Bộ nhớ đệm Global để khử trùng lặp
-    # Lưu 1 triệu ID bài hát (dạng chuỗi) chỉ tốn khoảng 50MB - 100MB RAM -> An toàn.
-    seen_ids = set()
-    total_processed = 0
-    total_songs_saved = 0
+    print(f"Tìm thấy {len(input_files)} file sạch.")
 
-    print("⏳ Đang chạy Streaming...")
+    print("\nKhởi tạo Spark Session...")
+    spark = SparkSession.builder \
+        .appName("ExtractSongsFixedType") \
+        .config("spark.driver.memory", "3g") \
+        .getOrCreate()
 
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f_out:
-        for file_path in files:
-            print(f"   📂 Reading file: {os.path.basename(file_path)}")
-            
-            # Mở file Parquet ở chế độ Stream
-            parquet_file = pq.ParquetFile(file_path)
-            
-            # Duyệt qua từng nhóm dòng (Batch)
-            for batch in parquet_file.iter_batches(batch_size=BATCH_SIZE, columns=[
-                "musicbrainz_track_id", "track_name", 
-                "musicbrainz_artist_id", "artist_name"
-            ]):
-                # Chuyển Batch sang Pandas DataFrame (Chỉ tốn RAM cho 50k dòng)
-                df = batch.to_pandas()
-                
-                # Đổi tên cột
-                df = df.rename(columns={
-                    "musicbrainz_track_id": "_id",
-                    "track_name": "title",
-                    "musicbrainz_artist_id": "artist_id",
-                    "artist_name": "artist"
-                })
+    # Định nghĩa schema tĩnh để tránh lỗi schema inference
+    song_schema = StructType([
+        StructField("musicbrainz_track_id", StringType(), True),
+        StructField("track_name", StringType(), True),
+        StructField("musicbrainz_artist_id", StringType(), True),
+        StructField("artist_name", StringType(), True),
+        StructField("track_index", LongType(), True),
+        StructField("artist_index", LongType(), True)
+    ])
 
-                # Lọc rác
-                df = df.dropna(subset=["_id", "title"])
-                
-                # Xử lý ghi file
-                batch_json_lines = []
-                for _, row in df.iterrows():
-                    # Check trùng lặp cực nhanh bằng Set
-                    if row['_id'] not in seen_ids:
-                        seen_ids.add(row['_id'])
-                        batch_json_lines.append(json.dumps(row.to_dict(), ensure_ascii=False))
-                
-                # Ghi xuống đĩa ngay lập tức
-                if batch_json_lines:
-                    f_out.write("\n".join(batch_json_lines) + "\n")
-                    total_songs_saved += len(batch_json_lines)
+    try:
+        print("📖 Đang đọc dữ liệu...")
+        # Spark nhận list các đường dẫn string
+        raw_df = spark.read.schema(song_schema).parquet(*input_files)
+        
+        print("Đang xử lý ETL...")
+        songs_df = raw_df.select(
+            col("musicbrainz_track_id").alias("_id"),
+            col("track_name"),
+            col("musicbrainz_artist_id"),
+            col("artist_name")
+        ).dropDuplicates(["_id"])
 
-                # Cập nhật tiến độ
-                total_processed += len(df)
-                if total_processed % 500000 == 0:
-                    print(f"      -> Đã quét {total_processed:,} dòng... (Lấy được {total_songs_saved:,} bài)")
+        count = songs_df.count()
+        print(f"Tìm thấy tổng cộng: {count} bài hát duy nhất.")
 
-    print("✅ HOÀN TẤT!")
-    print(f"   - Tổng log đã quét: {total_processed:,}")
-    print(f"   - Tổng bài hát sạch: {total_songs_saved:,}")
-    print(f"   - Output: {OUTPUT_FILE}")
+        print(f"Đang ghi file JSON vào: {OUTPUT_DIR}")
+        
+        # Ghi song song (Không dùng coalesce để tránh OOM)
+        songs_df.write \
+            .mode("overwrite") \
+            .json(OUTPUT_DIR)
+
+        print("THÀNH CÔNG! Bây giờ bạn hãy kiểm tra thư mục data.")
+
+    except Exception as e:
+        print(f"VẪN CÒN LỖI: {e}")
+    finally:
+        spark.stop()
 
 if __name__ == "__main__":
     main()
