@@ -55,6 +55,22 @@ music-recsys/
 
 Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **MongoDB** cho dữ liệu định danh/metadata và **Milvus** cho dữ liệu Vector đặc trưng.
 
+### Phase 0. MinIO (Data Lake - Raw Logs)
+
+> Lưu trữ nhật ký hành vi người dùng (User Logs) dưới dạng **Parquet**, được phân vùng (partition) theo ngày để tối ưu hóa tốc độ truy vấn của Spark.
+
+* **Bucket:** `datalake`
+* **Storage Path:** `raw/logs/date=YYYY-MM-DD/part-*.parquet`
+* **Format:** Apache Parquet (Snappy Compression)
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `user_id` | String | ID người dùng (Khóa ngoại tham chiếu `users`). |
+| `track_id` | String | ID bài hát (Khóa ngoại tham chiếu `songs`). |
+| `timestamp` | **Long** | Thời điểm tương tác (**Epoch Milliseconds**). |
+| `action` | String | Loại hành vi: `listen`, `skip`, `like`. |
+| `source` | String | Nguồn dữ liệu: `simulation` (Tool giả lập) hoặc `real_user` (Web App). |
+
 ### Phase 1. MongoDB (Metadata & User Profile)
 
 #### Collection: `songs`
@@ -67,6 +83,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `title`     | String | Tên bài hát                |
 | `artist`    | String | Tên nghệ sĩ                |
 | `artist_id` | String | Mã định danh nghệ sĩ     |
+| `image_url` | String | Đường dẫn ảnh đại diện bài hát |
+| `url` | String | Đường dẫn đến dữ liệu bài hát |
 
 #### Collection: `users`
 
@@ -118,7 +136,7 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 
 *Mục tiêu: Gợi ý theo sở thích dài hạn.*
 
-1. **Backend:** Lấy `user_vector` từ MongoDB (theo User ID).
+1. **Backend:** Lấy `user_vector` từ Redis hoặc từ MongoDB (theo User ID).
 2. **Search:** Gửi `user_vector` sang Milvus.
 3. **Query:** `Milvus.search(data=[user_vector], limit=10, metric="IP")`.
 4. **Result:** Join ID kết quả với MongoDB `songs` -> Trả về Frontend.
@@ -129,8 +147,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 
 1. **Context:** User vừa nghe bài hát **X**.
 2. **Backend:**
-   * Lấy `user_vector` (Sở thích gốc) từ MongoDB.
-   * Lấy `song_vector_X` (Mood hiện tại) từ Milvus.
+   * Lấy `user_vector` (Sở thích gốc) từ Redis hoặc MongoDB.
+   * Lấy `song_vector_X` (Mood hiện tại) từ Redis.
 3. **Calculation:** Tính Vector Phiên (Session Vector):
    $$
    V_{session} = (0.7 \times V_{user}) + (0.3 \times V_{song\_X})
