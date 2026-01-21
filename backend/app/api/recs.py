@@ -1,5 +1,5 @@
 from fastapi import APIRouter #type: ignore
-from services.recommender import RecommendationService
+from app.services.recommender import RecommendationService
 
 router = APIRouter()
 recs = RecommendationService('music_collection')

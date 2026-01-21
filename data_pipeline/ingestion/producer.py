@@ -6,12 +6,8 @@ from pathlib import Path
 import pyarrow.parquet as pq
 from confluent_kafka import Producer #type: ignore
 from confluent_kafka.admin import AdminClient, NewTopic #type: ignore 
-<<<<<<< HEAD
-import src.configs as cfg
-=======
-import src.config as cfg
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
-from src.utils import get_logger
+import config as cfg
+from common.logger import get_logger
 
 logger = get_logger("Kafka_Producer")
 
@@ -39,37 +35,21 @@ class KafkaService:
             replication_factor = cfg.KAFKA_REPLICATION_FACTOR
         
         # Kiểm tra tồn tại Topic
-<<<<<<< HEAD
-        logger.info(f"🔧 Đang kiểm tra Topic '{self.topic}'...")
+        logger.info(f"[Kafka] Đang kiểm tra Topic '{self.topic}'...")
         metadata = self.admin.list_topics(timeout=10)
 
         if self.topic in metadata.topics:
-            logger.info(f"✅ Topic '{self.topic}' đã tồn tại.")
+            logger.info(f"[Kafka] Topic '{self.topic}' đã tồn tại.")
         else:
-            logger.warning(f"⚠️ Topic chưa có. Đang tạo mới...")
-=======
-        logger.info(f"Đang kiểm tra Topic '{self.topic}'...")
-        metadata = self.admin.list_topics(timeout=10)
-
-        if self.topic in metadata.topics:
-            logger.info(f"Topic '{self.topic}' đã tồn tại.")
-        else:
-            logger.warning(f"Topic chưa có. Đang tạo mới...")
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
+            logger.warning(f"[Kafka] Topic chưa có. Đang tạo mới...")
             new_topic = NewTopic(self.topic, num_partitions, replication_factor)
             fs = self.admin.create_topics([new_topic])
             for topic, future in fs.items():
                 try:
                     future.result()
-<<<<<<< HEAD
-                    logger.info(f"🎉 Đã tạo thành công topic: {topic}")
+                    logger.info(f"[Kafka] Đã tạo thành công topic: {topic}")
                 except Exception as e:
-                    logger.error(f"❌ Không thể tạo topic {topic}: {e}")
-=======
-                    logger.info(f" Đã tạo thành công topic: {topic}")
-                except Exception as e:
-                    logger.error(f" Không thể tạo topic {topic}: {e}")
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
+                    logger.error(f"[Kafka] Không thể tạo topic {topic}: {e}")
 
     def send_message(self, record):
         """Gửi 1 bản ghi vào Kafka"""
@@ -78,15 +58,11 @@ class KafkaService:
             self.producer.produce(self.topic, value=msg_value)
             self.producer.poll(0)
         except BufferError:
-<<<<<<< HEAD
-            logger.warning("⚠️ Hàng đợi đầy, đang chờ xả bớt...")
-=======
-            logger.warning(" Hàng đợi đầy, đang chờ xả bớt...")
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
+            logger.warning("[Kafka] Hàng đợi đầy, đang chờ xả bớt...")
             self.producer.poll(1) # Chờ 1s để giải phóng bộ đệm
 
     def close(self):
-        logger.info("🔌 Đang đóng Producer...")
+        logger.info("[Kafka] Đang đóng Producer...")
         self.producer.flush(10)
 
 # ================= TRÌNH TẠO LOG NGƯỜI DÙNG =================
@@ -109,36 +85,68 @@ class MusicStreamPlayer:
         files = sorted([f for f in path_obj.glob("*.parquet") if f.is_file() and not f.name.startswith('.')])
         
         if not files:
-<<<<<<< HEAD
-            logger.error(f"❌ Không tìm thấy file parquet nào tại: {clean_path}")
+            logger.error(f"[MusicStreamPlayer] Không tìm thấy file parquet nào tại: {clean_path}")
             return
 
-        logger.info(f"🚀 Bắt đầu Replay {len(files)} file với tốc độ: x{self.speed_factor}")
+        logger.info(f"[MusicStreamPlayer] Bắt đầu Replay {len(files)} file với tốc độ: x{self.speed_factor}")
         
         for file_path in files:
-            logger.info(f"📖 Đang đọc file: {file_path.name}")
-=======
-            logger.error(f"Không tìm thấy file parquet nào tại: {clean_path}")
-            return
-
-        logger.info(f"Bắt đầu Replay {len(files)} file với tốc độ: x{self.speed_factor}")
-        
-        for file_path in files:
-            logger.info(f"Đang đọc file: {file_path.name}")
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
+            logger.info(f"[MusicStreamPlayer] Đang đọc file: {file_path.name}")
             try:
                 pf = pq.ParquetFile(file_path)
             except Exception as e:
-                logger.error(f"Lỗi đọc file {file_path.name}: {e}")
+                logger.error(f"[MusicStreamPlayer] Lỗi đọc file {file_path.name}: {e}")
                 continue
 
             for batch in pf.iter_batches(batch_size=2000):
                 records = batch.to_pylist()
                 for record in records:
-                    yield self._process_time_travel(record)
+                    record_after_sleep = self._process_time_travel(record)
+                    
+                    if not record_after_sleep:
+                        continue
+                    final_record = self._normalize_record(record_after_sleep)
+                    if final_record:
+                        yield final_record
+
+    def _normalize_record(self, record: dict) -> dict:
+        """
+        Map dữ liệu thô từ Parquet sang Schema chuẩn của hệ thống.
+        Schema này PHẢI KHỚP với API Backend (app/api/logging.py).
+        """
+        try:
+            # 1. Map ID (Xử lý trường hợp file parquet dùng tên cột khác)
+            # Ưu tiên lấy user_id, nếu không có thì tìm userId, không có nữa thì bỏ qua
+            user_id = str(record.get('user_id'))
+            track_id = str(record.get('musicbrainz_track_id'))
+
+            # Nếu dữ liệu rác không có ID thì bỏ qua
+            if not user_id or not track_id:
+                return None # type: ignore
+
+            # 2. Chuẩn hóa Timestamp (về Milliseconds Int giống API)
+            # _process_time_travel đã update 'timestamp' thành chuỗi ISO hiện tại
+            # Ta convert nó sang Unix Timestamp (ms)
+            iso_ts = record.get('timestamp')
+            if isinstance(iso_ts, str):
+                dt = datetime.fromisoformat(iso_ts)
+                ts_ms = int(dt.timestamp() * 1000)
+            else:
+                ts_ms = int(time.time() * 1000)
+
+            # 3. Trả về Dictionary đúng chuẩn
+            return {
+                "user_id": user_id,
+                "track_id": track_id,
+                "timestamp": ts_ms,          # Kiểu Int (Epoch millis)
+                "action": str(record.get('action', 'listen')), # Mặc định là listen
+                "source": "simulation"       # Tag phân biệt
+            }
+        except Exception:
+            return None # type: ignore
 
     def _process_time_travel(self, record):
-        """Xử lý logic Time Travel phức tạp tách riêng ra đây"""
+        """Xử lý logic Time Travel cho từng bản ghi"""
         ts_val = record.get('timestamp')
         if not ts_val: return record
 
@@ -164,11 +172,7 @@ class MusicStreamPlayer:
             if sleep_duration > self.max_sleep_sec:
                 skip = sleep_duration - self.max_sleep_sec
                 self.time_skip_accumulation += skip
-<<<<<<< HEAD
-                logger.info(f"⏩ Nhảy cóc {skip:.1f}s ...")
-=======
                 logger.info(f"Nhảy cóc {skip:.1f}s ...")
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
                 time.sleep(self.max_sleep_sec)
             else:
                 time.sleep(sleep_duration)
@@ -178,8 +182,6 @@ class MusicStreamPlayer:
 
 # ================= MAIN PROGRAM =================
 def run():
-<<<<<<< HEAD
-=======
     import argparse
     
     parser = argparse.ArgumentParser(description="Kafka Music Log Producer")
@@ -205,47 +207,25 @@ def run():
     
     logger.info(f" Chế độ: {mode_name}")
     
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
     # 1. Khởi tạo Service
     kafka_svc = KafkaService()
     kafka_svc.ensure_topic_exists()
 
     # 2. Khởi tạo Player
-<<<<<<< HEAD
-    # Dùng đường dẫn từ Config luôn
-    player = MusicStreamPlayer(
-        data_dir=cfg.MUSIC_LOGS_DATA_PATH,
-        speed_factor=200.0
-=======
     player = MusicStreamPlayer(
         data_dir=cfg.MUSIC_LOGS_DATA_PATH,
         speed_factor=speed_factor
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
     )
 
     # 3. Chạy vòng lặp chính
     total_sent = 0
-<<<<<<< HEAD
-=======
     start_time = time.time()
     
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
     try:
         for record in player.stream_records():
             if record:
                 kafka_svc.send_message(record)
                 total_sent += 1
-<<<<<<< HEAD
-                if total_sent % 100 == 0:
-                    print(f"✅ Sent: {total_sent} records...", end='\r')
-        
-        print(f"\n🎉 HOÀN TẤT! Tổng cộng: {total_sent}")
-
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Dừng chương trình theo yêu cầu.")
-    except Exception as e:
-        logger.error(f"💥 Lỗi không mong muốn: {e}")
-=======
                 if total_sent % 1000 == 0:
                     elapsed = time.time() - start_time
                     rate = total_sent / elapsed if elapsed > 0 else 0
@@ -261,7 +241,6 @@ def run():
         logger.info("\nDừng chương trình theo yêu cầu.")
     except Exception as e:
         logger.error(f"Lỗi không mong muốn: {e}")
->>>>>>> f2a3c0cb44332e3d895c5838728b4a6632badba2
     finally:
         kafka_svc.close()
 

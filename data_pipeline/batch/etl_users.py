@@ -10,8 +10,9 @@ from pyspark.sql.functions import col, lit
 from pyspark.sql.types import ArrayType, FloatType
 
 # Import config và utils tập trung
-import src.config as cfg
-from src.utils import get_logger, get_spark_session
+import config as cfg
+from utils import get_spark_session
+from common.logger import get_logger
 
 # Khởi tạo logger
 logger = get_logger("ETL_Users")

@@ -1,27 +1,8 @@
-import logging
-import sys
 from pyspark.sql import SparkSession
 from pymongo import MongoClient #type: ignore
-import src.config as cfg #type: ignore
+import config as cfg #type: ignore
 from minio import Minio  #type: ignore
-
-def get_logger(name):
-    """
-    Tạo logger chuẩn cho ứng dụng.
-    Output: Log ra màn hình console (stdout) với định dạng dễ đọc.
-    """
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    
-    # Kiểm tra xem logger đã có handler chưa để tránh duplicate log
-    if not logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        # Định dạng: [Thời gian] - [Tên Module] - [Level] - [Nội dung]
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        
-    return logger
+from common.logger import get_logger
 
 def get_spark_session(app_name):
     """

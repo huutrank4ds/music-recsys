@@ -26,8 +26,8 @@ from pymilvus import (
 # ============================================================
 # IMPORT CENTRALIZED CONFIG & UTILS
 # ============================================================
-import src.config as cfg
-from src.utils import get_logger
+import config as cfg
+from common.logger import get_logger
 
 # Khởi tạo logger
 logger = get_logger("ALS_Training")

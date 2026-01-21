@@ -1,22 +1,31 @@
-from pyspark.sql.functions import from_json, col, to_timestamp, date_format
-import src.utils as utils
-from src.schemas import get_music_log_schema
-import src.configs as cfg
+"""
+Spark Streaming ETL - Kafka to MinIO
+=====================================
+Đọc dữ liệu từ Kafka topic và ghi xuống MinIO (Parquet).
+"""
 
+from pyspark.sql.functions import from_json, col, to_timestamp, date_format
+import config as cfg
+from schemas import get_music_log_schema
+from utils import get_spark_session, ensure_minio_bucket
+from common.logger import get_logger
+
+# Khởi tạo logger
+logger = get_logger("Streaming_ETL")
 
 def run_etl():
-    print("Khởi động Spark Streaming ETL...")
-    spark = utils.get_spark_session("LastFm_Streaming_ETL")
+    logger.info("Khởi động Spark Streaming ETL...")
+    
+    # Khởi tạo Spark từ utils
+    spark = get_spark_session("LastFm_Streaming_ETL")
     spark.sparkContext.setLogLevel("WARN")
+    ensure_minio_bucket(cfg.DATALAKE_BUCKET)
 
-    # ĐỊNH NGHĨA SCHEMA 
+    # Sử dụng schema từ schemas.py
     schema = get_music_log_schema()
 
-    # Kiểm tra và tạo bucket trên MinIO nếu chưa có
-    utils.ensure_minio_bucket(cfg.DATALAKE_BUCKET)
-
     # Đọc dữ liệu từ Kafka
-    print("Đang lắng nghe Kafka Topic 'music_log'...")
+    logger.info(f"Đang lắng nghe Kafka Topic '{cfg.KAFKA_TOPIC}'...")
     kafka_df = spark.readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", cfg.KAFKA_BOOTSTRAP_SERVERS) \
@@ -31,10 +40,10 @@ def run_etl():
         .withColumn("event_time", to_timestamp(col("timestamp"))) \
         .withColumn("date_str", date_format(col("event_time"), "yyyy-MM-dd"))
 
-    #  Ghi xuống MinIO (Parquet)
-    print("Đang ghi xuống MinIO (Parquet)...")
+    # Ghi xuống MinIO 
+    logger.info("Đang ghi xuống MinIO (Parquet)...")
     
-    checkpoint_path = cfg.MINIO_CHECKPOINT_PATH
+    checkpoint_path = f"s3a://{cfg.DATALAKE_BUCKET}/checkpoints/music_logs/"
     output_path = cfg.MINIO_RAW_MUSIC_LOGS_PATH
 
     query = processed_df.writeStream \

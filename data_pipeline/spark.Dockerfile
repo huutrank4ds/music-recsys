@@ -37,7 +37,7 @@ RUN curl -O https://repo1.maven.org/maven2/org/mongodb/spark/mongo-spark-connect
 
 # 5. Cài đặt thư viện Python
 WORKDIR /opt/spark/work-dir
-COPY requirements.txt .
+COPY data_pipeline/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 6. Permissions (Trả quyền lại cho user spark)
