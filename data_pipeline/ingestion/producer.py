@@ -140,6 +140,8 @@ class MusicStreamPlayer:
                 "track_id": track_id,
                 "timestamp": ts_ms,          # Kiểu Int (Epoch millis)
                 "action": str(record.get('action', 'listen')), # Mặc định là listen
+                "duration": int(record.get('duration', 5*60000)), # Độ dài hành động hoặc mặc định 5 phút
+                "total_duration": int(record.get('total_duration', 5*60000)), # Tổng độ dài bài hoặc mặc định 5 phút
                 "source": "simulation"       # Tag phân biệt
             }
         except Exception:

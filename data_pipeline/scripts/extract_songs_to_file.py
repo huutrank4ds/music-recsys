@@ -2,8 +2,23 @@ from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from pyspark.sql.types import StructType, StructField, StringType, LongType
+import hashlib
+import urllib.parse
+from common.logger import get_logger
 
-# ================= 1. HÀM TIỆN ÍCH =================
+logger = get_logger("Extract_Songs_To_File")
+
+# Hàm tạo URL ảnh bìa nhất quán dựa trên tên bài hát
+def generate_consistent_cover_url(song_title: str) -> str:
+    # Băm tên bài hát ra mã Hex (MD5) -> Lấy 6 ký tự đầu làm màu
+    hash_object = hashlib.md5(song_title.encode())
+    consistent_bg = hash_object.hexdigest()[:6] # Ví dụ: 5d4140
+
+    safe_name = urllib.parse.quote(song_title)
+    
+    return f"https://ui-avatars.com/api/?name={safe_name}&background={consistent_bg}&color=fff&size=512&length=1&bold=true"
+
+# Hàm quét và lấy danh sách file parquet hợp lệ
 def get_valid_parquet_files(data_dir_path):
     """
     Quét file parquet sử dụng pathlib
@@ -13,15 +28,12 @@ def get_valid_parquet_files(data_dir_path):
     # Chuyển đổi sang Path object nếu đầu vào là string
     data_path = Path(data_dir_path)
     
-    print(f"🔍 Đang quét file trong: {data_path}")
+    logger.info(f"Đang quét file trong: {data_path}")
     
     if not data_path.exists():
-        print(f"Thư mục không tồn tại: {data_path}")
+        logger.error(f"Thư mục không tồn tại: {data_path}")
         return []
 
-    # Sử dụng pathlib để glob và filter
-    # f.name: tên file (vd: part-0000.parquet)
-    # f.resolve(): đường dẫn tuyệt đối (vd: /opt/data/...)
     valid_files = [
         f"file://{f.resolve()}" 
         for f in data_path.glob("*.parquet") 
@@ -32,7 +44,7 @@ def get_valid_parquet_files(data_dir_path):
     valid_files.sort()
     return valid_files
 
-# ================= 2. HÀM CHÍNH =================
+# Hàm chính
 def main():
     # Sử dụng Path object cho đường dẫn đầu vào
     BASE_DIR = Path("/opt/data/processed_sorted")
@@ -43,12 +55,12 @@ def main():
     input_files = get_valid_parquet_files(BASE_DIR)
     
     if not input_files:
-        print("Không tìm thấy file!")
+        logger.error("Không tìm thấy file!")
         return
 
-    print(f"Tìm thấy {len(input_files)} file sạch.")
+    logger.info(f"Tìm thấy {len(input_files)} file sạch.")
 
-    print("\nKhởi tạo Spark Session...")
+    logger.info("\nKhởi tạo Spark Session...")
     spark = SparkSession.builder \
         .appName("ExtractSongsFixedType") \
         .config("spark.driver.memory", "3g") \
@@ -65,11 +77,11 @@ def main():
     ])
 
     try:
-        print("📖 Đang đọc dữ liệu...")
+        logger.info("Đang đọc dữ liệu...")
         # Spark nhận list các đường dẫn string
         raw_df = spark.read.schema(song_schema).parquet(*input_files)
         
-        print("Đang xử lý ETL...")
+        logger.info("Đang xử lý ETL...")
         songs_df = raw_df.select(
             col("musicbrainz_track_id").alias("_id"),
             col("track_name"),
@@ -78,19 +90,19 @@ def main():
         ).dropDuplicates(["_id"])
 
         count = songs_df.count()
-        print(f"Tìm thấy tổng cộng: {count} bài hát duy nhất.")
+        logger.info(f"Tìm thấy tổng cộng: {count} bài hát duy nhất.")
 
-        print(f"Đang ghi file JSON vào: {OUTPUT_DIR}")
+        logger.info(f"Đang ghi file JSON vào: {OUTPUT_DIR}")
         
         # Ghi song song (Không dùng coalesce để tránh OOM)
         songs_df.write \
             .mode("overwrite") \
             .json(OUTPUT_DIR)
 
-        print("THÀNH CÔNG! Bây giờ bạn hãy kiểm tra thư mục data.")
+        logger.info("THÀNH CÔNG! Bây giờ bạn hãy kiểm tra thư mục data.")
 
     except Exception as e:
-        print(f"VẪN CÒN LỖI: {e}")
+        logger.error(f"VẪN CÒN LỖI: {e}")
     finally:
         spark.stop()
 

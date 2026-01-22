@@ -1,17 +1,14 @@
-from pyspark.sql.types import StructType, StructField, StringType, LongType, TimestampType
-
 from pyspark.sql.types import StructType, StructField, StringType, LongType, IntegerType
 
 def get_music_log_schema():
-    """
-    Schema khớp hoàn toàn với dữ liệu JSON từ Kafka Producer & API Backend.
-    """
     return StructType([
         StructField("user_id", StringType(), True),
-        StructField("track_id", StringType(), True), 
+        StructField("track_id", StringType(), True),
         StructField("timestamp", LongType(), True),
         StructField("action", StringType(), True),
         StructField("source", StringType(), True),
+        StructField("duration", IntegerType(), True),
+        StructField("total_duration", IntegerType(), True) 
     ])
 
 def get_song_master_schema():
