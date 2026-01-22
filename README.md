@@ -21,34 +21,51 @@ Tổ chức mã nguồn và dữ liệu được phân chia rõ ràng theo các 
 
 ```text
 music-recsys/
-├── docker-compose.yml           # Quản lý hạ tầng (Spark, Kafka, Mongo, MinIO)
+├── docker-compose.yml           # Quản lý hạ tầng
 ├── .env
-├── scripts/
-│   ├── download_data.py
-│   ├── fix_format.py
-│   └── preprocess_sort.py
-├── configs/                     # Các file cấu hình môi trường
-│   └── spark-defaults.conf
+├── .gitignore
+├── README.md
+├── backend/
+│   ├── api.Dockerfile
+│   ├── requirements.txt
+│   └── app/
+│       ├── main.py
+│       ├── api/
+│       │   ├── recs.py
+│       │   └── search.py
+│       ├── core/
+│       │   └── database.py
+│       └── services/
+│           ├── music.py
+│           └── recommender.py
+├── common/
+│   ├── schemas.py
+│   └── logger.py
 ├── data/                        # Dữ liệu (Mounted Volume - Máy Host)
 │   ├── raw/                     # Dữ liệu thô (Logs)
 │   ├── processed_sorted/        # Dữ liệu Parquet đã làm sạch (Input cho Model)
 │   ├── songs_master_list/       # File JSON danh sách bài hát (Output bước ETL)
 │   └── checkpoints/             # Spark Streaming Checkpoints
-├── src/                         # Mã nguồn chính
-│   ├── config.py
-│   ├── utils.py
-│   ├── app/                       <-- (Web App & API)
-│   │   ├── __init__.py
-│   │   ├── main.py                <-- (File chạy chính của Web)
-│   │   └── templates/
-│   │       └── index.html
-│   └── pipelines/
-│       ├── ingestion/
-│       │   ├── producer.py
-│       │   └── kafka_to_minio.py
-│       └── batch/
-│           └── sync_songs_master.py
-│           └── train_als_vector.py    # Spark ALS -> Train -> Push Vector to Mongo/Milvus
+└── data_pipeline/                      
+    ├── config.py
+    ├── spark.Dockerfile.py
+    ├── utils.py
+    ├── requirements.txt
+    ├── batch/              
+    │   ├── etl_master_data.py
+    │   ├── etl_users.py  
+    │   └── import_master_songs.py
+    ├── ingestion/
+    │   ├── producer.py
+    │   └── stream_to_minio.py
+    ├── modeling/
+    │   └── train_als_model.py
+    └── scripts/ 
+        ├── download_data.py
+        ├── preprocess_sort.py
+        ├── fix_format.py
+        └── train_als_model.py
+
 ```
 
 ## 🗄️ Database Schema Design
