@@ -17,10 +17,13 @@ def get_song_master_schema():
     Dùng cho Job Import Master Songs để đảm bảo đúng kiểu dữ liệu.
     """
     return StructType([
-        StructField("musicbrainz_track_id", StringType(), True),
+        StructField("_id", StringType(), True),
         StructField("track_name", StringType(), True),
-        StructField("musicbrainz_artist_id", StringType(), True),
+        StructField("artist_id", StringType(), True),
         StructField("artist_name", StringType(), True),
-        StructField("track_index", LongType(), True),
-        StructField("artist_index", LongType(), True)
+        StructField("image_url", StringType(), True),
+        StructField("url", StringType(), True),
+        StructField("duration_ms", IntegerType(), True),
+        StructField("plays_7d", IntegerType(), True),
+        StructField("plays_cumulative", LongType(), True)
     ])

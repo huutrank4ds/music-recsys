@@ -7,25 +7,29 @@ Spark Streaming ETL - Kafka to MinIO
 from pyspark.sql.functions import from_json, col, to_timestamp, date_format
 import config as cfg
 from common.schemas import get_music_log_schema
-from utils import get_spark_session, ensure_minio_bucket
+from utils import get_spark_session, ensure_minio_bucket, GracefulStopper
 from common.logger import get_logger
 
 # Khởi tạo logger
-logger = get_logger("Streaming_ETL")
+TASK_NAME = "Stream_to_MinIO"
+logger = get_logger(TASK_NAME)
+
 
 def run_etl():
-    logger.info("Khởi động Spark Streaming ETL...")
+
+    stopper = GracefulStopper(logger=logger)
+    logger.info(f"[{TASK_NAME}] Khởi động Spark Streaming ETL...")
     
     # Khởi tạo Spark từ utils
-    spark = get_spark_session("LastFm_Streaming_ETL")
+    spark = get_spark_session(TASK_NAME)
     spark.sparkContext.setLogLevel("WARN")
-    ensure_minio_bucket(cfg.DATALAKE_BUCKET)
+    ensure_minio_bucket(cfg.DATALAKE_BUCKET, logger=logger)
 
     # Sử dụng schema từ schemas.py
     schema = get_music_log_schema()
 
     # Đọc dữ liệu từ Kafka
-    logger.info(f"Đang lắng nghe Kafka Topic '{cfg.KAFKA_TOPIC}'...")
+    logger.info(f"[{TASK_NAME}] Đang lắng nghe Kafka Topic '{cfg.KAFKA_TOPIC}'...")
     kafka_df = spark.readStream \
         .format("kafka") \
         .option("kafka.bootstrap.servers", cfg.KAFKA_BOOTSTRAP_SERVERS) \
@@ -41,7 +45,7 @@ def run_etl():
         .withColumn("date_str", date_format(col("event_time"), "yyyy-MM-dd"))
 
     # Ghi xuống MinIO 
-    logger.info("Đang ghi xuống MinIO (Parquet)...")
+    logger.info(f"[{TASK_NAME}] Đang ghi xuống MinIO (Parquet)...")
     
     checkpoint_path = f"s3a://{cfg.DATALAKE_BUCKET}/checkpoints/music_logs/"
     output_path = cfg.MINIO_RAW_MUSIC_LOGS_PATH
@@ -54,8 +58,18 @@ def run_etl():
         .outputMode("append") \
         .trigger(processingTime="1 minute") \
         .start()
-
-    query.awaitTermination()
+    
+    stopper.attach(query)
+    
+    try:
+        query.awaitTermination()
+    except Exception as e:
+        logger.error(f"[{TASK_NAME}] Streaming bị lỗi: {e}")
+    finally:
+        # Đây là lúc chính thức trả Worker và đóng ứng dụng
+        logger.info(f"[{TASK_NAME}] Đang đóng Spark Session...")
+        spark.stop()
+        logger.info(f"[{TASK_NAME}] ETL đã tắt thành công. Tài nguyên đã được giải phóng.")
 
 if __name__ == "__main__":
     run_etl()

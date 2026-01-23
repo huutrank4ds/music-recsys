@@ -1,3 +1,5 @@
+import signal
+import sys
 from pyspark.sql import SparkSession
 from pymongo import MongoClient #type: ignore
 import config as cfg #type: ignore
@@ -29,11 +31,11 @@ def get_mongo_collection(collection_name):
     db = client[cfg.MONGO_DB]
     return db[collection_name]
 
-def ensure_minio_bucket(bucket_name):
+def ensure_minio_bucket(bucket_name, logger=None):
     """
     Kiểm tra bucket trên MinIO, nếu chưa có thì tạo mới.
     """
-    logger = get_logger("MinIO_Check")
+    logger = logger or get_logger("MinIO_Check")
     
     # Lưu ý: Chạy trong Docker nên endpoint là minio:9000
     # Cần cắt bỏ 'http://' vì thư viện Minio không cần scheme
@@ -48,10 +50,34 @@ def ensure_minio_bucket(bucket_name):
     
     try:
         if not client.bucket_exists(bucket_name):
-            logger.warning(f" Bucket '{bucket_name}' chưa tồn tại. Đang tạo mới...")
+            logger.warning(f" [{logger.name}] Bucket '{bucket_name}' chưa tồn tại. Đang tạo mới...")
             client.make_bucket(bucket_name)
-            logger.info(f" Đã tạo bucket '{bucket_name}' thành công.")
+            logger.info(f" [{logger.name}] Đã tạo bucket '{bucket_name}' thành công.")
         else:
-            logger.info(f" Bucket '{bucket_name}' đã tồn tại.")
+            logger.info(f" [{logger.name}] Bucket '{bucket_name}' đã tồn tại.")
     except Exception as e:
         logger.error(f" Lỗi khi kiểm tra MinIO Bucket: {e}")
+
+class GracefulStopper:
+    def __init__(self, logger=None):
+        self.query = None
+        self.logger = logger or get_logger("GracefulStopper")
+        
+        signal.signal(signal.SIGINT, self._handler)
+        signal.signal(signal.SIGTERM, self._handler)
+
+    def attach(self, query):
+        """Gắn query đang chạy vào bộ xử lý"""
+        self.query = query
+
+    def _handler(self, sig, frame):
+        """Hàm xử lý nội bộ"""
+        self.logger.warning(f"[{self.logger.name}] Nhận tín hiệu dừng (Signal: {sig})! Đang tắt Gracefully...")
+        
+        if self.query:
+            # Nếu đã có query, ra lệnh dừng và đợi xử lý nốt batch
+            self.logger.info(f"[{self.logger.name}] Đang đợi batch hiện tại hoàn thành...")
+            self.query.stop()
+        else:
+            # Nếu chưa có query nào chạy (đang khởi động), thoát luôn
+            sys.exit(0)

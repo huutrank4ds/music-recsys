@@ -33,7 +33,7 @@ COLLECTION_SONGS = os.getenv("COLLECTION_SONGS", "songs")
 # 4. PATHS (FILE SYSTEM & OBJECT STORAGE)
 # ==========================================
 # Đường dẫn Checkpoint (Nên dùng file:/// để ghi ổ cứng local cho nhanh)
-MINIO_CHECKPOINT_PATH = os.getenv("MINIO_CHECKPOINT_PATH", "file:///opt/data/checkpoints/music_logs/")
+MINIO_CHECKPOINT_PATH = os.getenv("MINIO_CHECKPOINT_PATH", "file:///opt/data/checkpoints/")
 
 # Đường dẫn dữ liệu thô trên MinIO (s3a://...)
 MINIO_RAW_MUSIC_LOGS_PATH = os.getenv("MINIO_RAW_MUSIC_LOGS_PATH", f"s3a://{DATALAKE_BUCKET}/raw/music_logs/")

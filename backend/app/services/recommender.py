@@ -71,7 +71,7 @@ class RecommendationService:
         Gợi ý cho user mới chưa có lịch sử (Cold Start).
         Lấy ngẫu nhiên từ tập bài hát phổ biến.
         """
-        popular_songs = await DB.db["songs"].find().sort("popularity", -1).limit(limit*2).to_list(length=limit*2)
+        popular_songs = await DB.db["songs"].find().sort("plays_7d", -1).limit(limit*2).to_list(length=limit*2)
         
         if not popular_songs:
             return []
