@@ -84,6 +84,7 @@ services:
       - ./data:/opt/data
       - ./data_pipeline:/opt/src
       - ./common:/opt/src/common
+      - ./src/enrichment:/opt/src/enrichment
     depends_on:
       kafka:
         condition: service_healthy
@@ -145,7 +146,7 @@ services:
       - mongo_data:/data/db
     networks:
       - bigdata-net
-  
+
   # -----------------------------------------------------------
   # 6. JOBS & APPS (Đổi tên & Thêm mới)
   # -----------------------------------------------------------
@@ -153,7 +154,7 @@ services:
   job-sync-master:
     image: my-apache-spark:3.5
     container_name: job-sync-master
-    user: root 
+    user: root
     depends_on:
       - mongodb
       - spark-master
@@ -216,8 +217,6 @@ services:
       - bigdata-net
     restart: on-failure
 
-
-
   # [APP] Service mới cho Web/API
   backend:
     build:
@@ -256,7 +255,7 @@ services:
     networks:
       - bigdata-net
     healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
+      test: [ "CMD", "etcdctl", "endpoint", "health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -276,7 +275,7 @@ services:
     depends_on:
       - minio
       - etcd
-    command: ["milvus", "run", "standalone"]
+    command: [ "milvus", "run", "standalone" ]
     volumes:
       - milvus_data:/var/lib/milvus
     networks:

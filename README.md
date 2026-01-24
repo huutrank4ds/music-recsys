@@ -32,7 +32,8 @@ music-recsys/
 │       ├── main.py
 │       ├── api/
 │       │   ├── recs.py
-│       │   └── search.py
+│       │   ├── search.py
+│       │   └── logging.py
 │       ├── core/
 │       │   └── database.py
 │       └── services/
@@ -46,18 +47,17 @@ music-recsys/
 │   ├── processed_sorted/        # Dữ liệu Parquet đã làm sạch (Input cho Model)
 │   ├── songs_master_list/       # File JSON danh sách bài hát (Output bước ETL)
 │   └── checkpoints/             # Spark Streaming Checkpoints
-└── data_pipeline/                      
+└── data_pipeline/                    
     ├── config.py
-    ├── spark.Dockerfile.py
+    ├── spark.Dockerfile
     ├── utils.py
     ├── requirements.txt
-    ├── batch/              
+    ├── batch/            
     │   ├── etl_master_data.py
     │   ├── etl_users.py  
     │   └── import_master_songs.py
     ├── ingestion/
     │   ├── producer.py
-    │   ├── stream_to_mongo.py     
     │   └── stream_to_minio.py
     ├── modeling/
     │   └── train_als_model.py
@@ -66,7 +66,6 @@ music-recsys/
         ├── preprocess_sort.py
         ├── fix_format.py
         └── train_als_model.py
-
 ```
 
 ## 🗄️ Database Schema Design
@@ -87,8 +86,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `track_id` | String | ID bài hát (Khóa ngoại tham chiếu `songs`). |
 | `timestamp` | **Long** | Thời điểm tương tác (**Epoch Milliseconds**). |
 | `action` | String | Loại hành vi: `listen`, `skip`, `complete`. |
-| `duration` | **Int** | Thời gian bài hát được nghe |
-| `total_duration` | **Int** | Tổng thời lượng bài hát |
+| `duration` | Integer | Thời gian đã nghe (giây). |
+| `total_duration` | Integer | Tổng thời lượng bài hát (giây). |
 | `source` | String | Nguồn dữ liệu: `simulation` (Tool giả lập) hoặc `real_user` (Web App). |
 
 ### Phase 1. MongoDB (Metadata & User Profile)
@@ -97,29 +96,25 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 
 > Lưu trữ thông tin hiển thị (Metadata).
 
-| Field         | Type   | Description                   |
-| :------------ | :----- | :---------------------------- |
-| `_id`       | String | **PK**. Track ID (UUID) |
-| `title`     | String | Tên bài hát                |
-| `artist`    | String | Tên nghệ sĩ                |
-| `artist_id` | String | Mã định danh nghệ sĩ     |
-| `duration_ms` | Int | Thời lượng bài hát |
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `_id` | String | **PK**. Track ID (UUID) |
+| `title` | String | Tên bài hát |
+| `artist` | String | Tên nghệ sĩ |
+| `artist_id` | String | Mã định danh nghệ sĩ |
 | `image_url` | String | Đường dẫn ảnh đại diện bài hát |
 | `url` | String | Đường dẫn đến dữ liệu bài hát |
-| `plays_7d` | Int | Số lượt nghe bài hát trong 7 ngày gần nhất |
-| `plays_cumulative` | Int | Số lượt nghe bài hát từ khi khởi tạo. |
-| `release_date` | String | Ngày khởi tạo bài hát |
 
 #### Collection: `users`
 
 > Lưu trữ vector sở thích người dùng (cập nhật hàng đêm).
 
-| Field             | Type             | Description                              |
-| :---------------- | :--------------- | :--------------------------------------- |
-| `_id`           | String           | **PK**. User ID                    |
-| `username`      | String           | Tên hiển thị                          |
-| `latent_vector` | Array`<Float>` | Vector đặc trưng `[0.1, -0.5, ...]` |
-| `last_updated`  | Date             | Thời gian chạy model gần nhất        |
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `_id` | String | **PK**. User ID |
+| `username` | String | Tên hiển thị |
+| `latent_vector` | Array `<Float>` | Vector đặc trưng `[0.1, -0.5, ...]` |
+| `last_updated` | Date | Thời gian chạy model gần nhất |
 
 ---
 
@@ -132,10 +127,10 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 * **Metric Type:** `IP` (Inner Product) - *Tương thích với thuật toán ALS.*
 * **Index Type:** `IVF_FLAT` hoặc `HNSW`.
 
-| Field         | Type              | Description                               |
-| :------------ | :---------------- | :---------------------------------------- |
-| `id`        | String            | **PK**. Track ID (Map với MongoDB) |
-| `embedding` | Vector`<Float>` | Item Factors từ Spark ALS                |
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `id` | String | **PK**. Track ID (Map với MongoDB) |
+| `embedding` | Vector `<Float>` | Item Factors từ Spark ALS |
 
 ## 🔄 Operational Workflow
 
@@ -208,7 +203,6 @@ Dưới đây là danh sách các hạng mục công việc cần hoàn thành �
   - [X] Spark Structured Streaming đọc từ Kafka.
   - [X] Sink dữ liệu xuống MinIO dưới dạng file `.parquet`.
   - [X] Partition dữ liệu theo ngày (`date=YYYY-MM-DD`).
-  - [X] Update lượt nghe xuống MongoDB.
 
 ### 3. 🧹 ETL & Master Data (Làm sạch & Metadata)
 
@@ -227,7 +221,7 @@ Dưới đây là danh sách các hạng mục công việc cần hoàn thành �
 
 - [X] **Environment Setup**
   - [X] Cài đặt `mongo-spark-connector`, `pymongo`, `pymilvus` trên Spark Worker.
-- [X] **Training Job (`train_als_vector.py`)**
+- [X] **Training Job (`train_als_model.py`)**
   - [X] **Sliding Window:** Chỉ load dữ liệu Parquet 90 ngày gần nhất.
   - [X] **Training:** Huấn luyện mô hình ALS (Alternating Least Squares).
   - [X] **Export Users:** Lưu `userFactors` vào MongoDB (`users` collection).
@@ -239,13 +233,14 @@ Dưới đây là danh sách các hạng mục công việc cần hoàn thành �
 > Mục tiêu: API phục vụ Frontend & Tính toán Vector.
 
 - [X] **Core Logic**
-  - [X] Module kết nối MongoDB & Milvus.
-  - [X] Hàm `vector_search(vector, top_k)`.
+  - [X] Module kết nối MongoDB & Milvus (`database.py`).
+  - [X] Hàm `vector_search(vector, top_k)` (`recommender.py`).
   - [X] Hàm tính toán `session_vector` (Weighted Average).
 - [X] **API Endpoints**
-  - [X] `GET /songs`: Danh sách bài hát (Pagination).
-  - [X] `GET /recommend/home`: Gợi ý trang chủ (User Vector -> Milvus).
-  - [X] `POST /recommend/next`: Gợi ý bài tiếp theo (Session Vector -> Milvus).
+  - [X] `GET /api/v1/search/songs`: Tìm kiếm bài hát.
+  - [X] `GET /api/v1/recs/recommendations/{user_id}`: Gợi ý trang chủ.
+  - [X] `GET /api/v1/recs/next-songs/{user_id}/{song_id}`: Gợi ý bài tiếp theo.
+  - [X] `POST /api/v1/logs/event`: Nhận log từ Web App.
 
 ### 6. 💻 Frontend (Web App)
 

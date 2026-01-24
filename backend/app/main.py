@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from app.core.database import DB
 from app.api.recs import router as recommendation_router
 from app.api.search import router as search_router
+from app.api.logging import router as logging_router
 from common.logger import get_logger
 
 logger = get_logger("Backend Main")
@@ -45,6 +46,7 @@ app = FastAPI(
 # Đăng ký Routers
 app.include_router(recommendation_router, prefix="/api/v1/recs", tags=["Recommendation"])
 app.include_router(search_router, prefix="/api/v1/search", tags=["Search"])
+app.include_router(logging_router, prefix="/api/v1/logs", tags=["User Logging"])
 
 @app.get("/", tags=["Health"])
 async def health_check():

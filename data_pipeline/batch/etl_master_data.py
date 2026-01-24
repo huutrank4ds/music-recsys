@@ -1,66 +1,95 @@
 """
 ETL Master Data - Songs Collection (MongoDB)
 =============================================
-Trích xuất danh sách bài hát từ Data Lake và lưu vào MongoDB.
-Schema: {_id, title, artist, artist_id}
+Trích xuất danh sách bài hát từ Data và lưu vào MongoDB.
+Schema: {_id, title, artist, artist_id, listen_count}
 """
 
-from pyspark.sql.functions import col, first
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, count
 
-# Import config và utils tập trung
-import config as cfg
-from utils import get_spark_session
-from common.logger import get_logger
+# ============================================================
+# CONFIGURATION
+# ============================================================
+MONGO_URI = "mongodb://mongodb:27017/music_recsys.songs"
+DATA_PATH = "/opt/data/processed_sorted"
+MIN_LISTEN_COUNT = 3
+TOP_SONGS_LIMIT = 200000
 
-# Khởi tạo logger
-logger = get_logger("ETL_Songs")
+def log(msg):
+    """Log to both console and file"""
+    print(msg, flush=True)
+    with open("/tmp/etl_songs.log", "a") as f:
+        f.write(f"{msg}\n")
 
 def run_master_data_etl():
-    logger.info("Bắt đầu ETL Master Data (Collection: songs)...")
+    log("=" * 60)
+    log("ETL Master Data - Songs Collection")
+    log("=" * 60)
     
-    # 1. Khởi tạo Spark từ utils
-    spark = get_spark_session("ETL_Songs_Master")
-    spark.conf.set("spark.executor.memory", "1g")
-    spark.conf.set("spark.executor.cores", "1")
-    spark.conf.set("spark.cores.max", "1")
+    # 1. Khởi tạo Spark với MongoDB config
+    log("Đang khởi tạo Spark Session...")
+    spark = SparkSession.builder \
+        .appName("ETL_Songs_Master") \
+        .config("spark.mongodb.output.uri", MONGO_URI) \
+        .getOrCreate()
 
-    # 2. Đọc dữ liệu từ MinIO (Data Lake)
-    logger.info("Đang đọc dữ liệu từ MinIO...")
+    # 2. Đọc dữ liệu gốc (có đầy đủ metadata)
+    log(f"Đang đọc từ: {DATA_PATH}")
     try:
-        df = spark.read.parquet(cfg.MINIO_RAW_MUSIC_LOGS_PATH)
+        df = spark.read.parquet(DATA_PATH)
+        total_rows = df.count()
+        log(f"Tổng số dòng: {total_rows:,}")
     except Exception as e:
-        logger.error(f"Lỗi đọc MinIO (Có thể do chưa có data): {e}")
+        log(f"LỖI đọc dữ liệu: {e}")
         spark.stop()
         return
 
-    # 3. Transform (Schema theo README mới)
-    # Mapping: {_id, title, artist, artist_id}
-    songs_raw = df.select(
-        col("musicbrainz_track_id").alias("_id"),        # PK: Track ID (UUID)
-        col("track_name").alias("title"),                # Tên bài hát
-        col("artist_name").alias("artist"),              # Tên nghệ sĩ
-        col("musicbrainz_artist_id").alias("artist_id"), # Mã định danh nghệ sĩ
+    # 3. Đếm số lượt nghe mỗi bài hát
+    log("Đang aggregate...")
+    songs_with_count = df.groupBy(
+        col("musicbrainz_track_id").alias("_id"),
+        col("track_name").alias("title"),
+        col("artist_name").alias("artist"),
+        col("musicbrainz_artist_id").alias("artist_id"),
+    ).agg(
+        count("*").alias("listen_count")
     )
+    
+    total_unique = songs_with_count.count()
+    log(f"Tổng số bài hát unique: {total_unique:,}")
 
-    # 4. Deduplicate (Lọc trùng lặp)
-    logger.info("Đang lọc bài hát duy nhất...")
-    songs_unique = songs_raw.groupBy("_id").agg(
-        first("title").alias("title"),
-        first("artist").alias("artist"),
-        first("artist_id").alias("artist_id"),
-    )
+    # 4. Lọc bài phổ biến
+    log(f"Lọc bài có >= {MIN_LISTEN_COUNT} lượt nghe...")
+    popular_songs = songs_with_count.filter(col("listen_count") >= MIN_LISTEN_COUNT)
+    after_filter = popular_songs.count()
+    log(f"Sau lọc: {after_filter:,} bài")
 
-    # 5. Load (Ghi vào MongoDB)
-    logger.info("Đang ghi vào MongoDB...")
-    songs_unique.write \
-        .format("mongodb") \
-        .mode("overwrite") \
-        .option("database", cfg.MONGO_DB) \
-        .option("collection", cfg.COLLECTION_SONGS) \
-        .save()
+    # 5. Giới hạn top N
+    if TOP_SONGS_LIMIT and after_filter > TOP_SONGS_LIMIT:
+        log(f"Giới hạn top {TOP_SONGS_LIMIT:,}...")
+        final_songs = popular_songs.orderBy(col("listen_count").desc()).limit(TOP_SONGS_LIMIT)
+    else:
+        final_songs = popular_songs
+    
+    final_count = final_songs.count()
+    log(f"Số bài cuối cùng: {final_count:,}")
 
-    logger.info(f"THÀNH CÔNG! Đã lưu {songs_unique.count()} bài hát vào MongoDB.")
+    # 6. Ghi vào MongoDB
+    log("Đang ghi vào MongoDB...")
+    try:
+        final_songs.write \
+            .format("mongo") \
+            .mode("overwrite") \
+            .save()
+        log(f"THÀNH CÔNG! Đã lưu {final_count:,} bài hát.")
+    except Exception as e:
+        log(f"LỖI ghi MongoDB: {e}")
+    
     spark.stop()
+    log("=" * 60)
 
 if __name__ == "__main__":
+    # Clear log file
+    open("/tmp/etl_songs.log", "w").close()
     run_master_data_etl()

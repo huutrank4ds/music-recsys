@@ -1,73 +1,81 @@
 """
 ETL Users Collection - MongoDB
 ==============================
-Trích xuất danh sách users duy nhất từ logs và tạo sẵn
-trong MongoDB để chuẩn bị cho việc sync latent_vector sau này.
+Trích xuất danh sách users duy nhất và lưu vào MongoDB.
 """
 
-from datetime import datetime
-from pyspark.sql.functions import col, lit
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, lit, first
 from pyspark.sql.types import ArrayType, FloatType
 
-# Import config và utils tập trung
-import config as cfg
-from utils import get_spark_session
-from common.logger import get_logger
+# ============================================================
+# CONFIGURATION
+# ============================================================
+MONGO_URI = "mongodb://mongodb:27017/music_recsys.users"
+DATA_PATH = "/opt/data/processed_sorted"
 
-# Khởi tạo logger
-logger = get_logger("ETL_Users")
+def log(msg):
+    """Log to both console and file"""
+    print(msg, flush=True)
+    with open("/tmp/etl_users.log", "a") as f:
+        f.write(f"{msg}\n")
 
 def run_users_etl():
-    logger.info("=" * 60)
-    logger.info("ETL Users Collection (MongoDB)")
-    logger.info(f"Started at: {datetime.now()}")
-    logger.info("=" * 60)
+    log("=" * 60)
+    log("ETL Users Collection")
+    log("=" * 60)
     
-    # 1. Khởi tạo Spark từ utils (đã có sẵn config MinIO & MongoDB)
-    spark = get_spark_session("ETL_Users_Master")
-    spark.conf.set("spark.executor.memory", "1g")
-    spark.conf.set("spark.executor.cores", "1")
-    spark.conf.set("spark.cores.max", "1")
+    # 1. Khởi tạo Spark với MongoDB config
+    log("Đang khởi tạo Spark Session...")
+    spark = SparkSession.builder \
+        .appName("ETL_Users_Master") \
+        .config("spark.mongodb.output.uri", MONGO_URI) \
+        .getOrCreate()
 
-    # 2. Đọc dữ liệu từ MinIO
-    logger.info("Đang đọc dữ liệu từ MinIO...")
+    # 2. Đọc dữ liệu gốc
+    log(f"Đang đọc từ: {DATA_PATH}")
     try:
-        df = spark.read.parquet(cfg.MINIO_RAW_MUSIC_LOGS_PATH)
+        df = spark.read.parquet(DATA_PATH)
+        total_rows = df.count()
+        log(f"Tổng số dòng: {total_rows:,}")
     except Exception as e:
-        logger.error(f"Lỗi đọc MinIO (Có thể do chưa có data): {e}")
+        log(f"LỖI đọc dữ liệu: {e}")
         spark.stop()
         return
 
-    # 3. Trích xuất danh sách users duy nhất
-    logger.info("Đang lọc users duy nhất...")
-    users_unique = df.select("user_id").distinct() \
-        .withColumn("username", col("user_id")) \
-        .withColumn("latent_vector", lit(None).cast(ArrayType(FloatType()))) \
-        .withColumn("last_updated", lit(None).cast("timestamp")) \
-        .select(
-            col("user_id").alias("_id"),
-            col("username"),
-            col("latent_vector"),
-            col("last_updated")
-        )
+    # 3. Lấy danh sách users duy nhất với thông tin profile
+    log("Đang lọc users duy nhất với profile...")
+    users_unique = df.groupBy("user_id").agg(
+        first("gender").alias("gender"),
+        first("age").alias("age"),
+        first("country").alias("country")
+    ).select(
+        col("user_id").alias("_id"),
+        col("user_id").alias("username"),
+        col("gender"),
+        col("age"),
+        col("country"),
+        lit(None).cast(ArrayType(FloatType())).alias("latent_vector")
+    )
+    
+    user_count = users_unique.count()
+    log(f"Tổng số users: {user_count:,}")
 
     # 4. Ghi vào MongoDB
-    logger.info("Đang ghi vào MongoDB...")
+    log("Đang ghi vào MongoDB...")
+    try:
+        users_unique.write \
+            .format("mongo") \
+            .mode("overwrite") \
+            .save()
+        log(f"THÀNH CÔNG! Đã lưu {user_count:,} users.")
+    except Exception as e:
+        log(f"LỖI ghi MongoDB: {e}")
     
-    # Đếm trước khi ghi
-    user_count = users_unique.count()
-    
-    users_unique.write \
-        .format("mongodb") \
-        .mode("overwrite") \
-        .option("database", cfg.MONGO_DB) \
-        .option("collection", cfg.COLLECTION_USERS) \
-        .save()
-
-    logger.info(f"THÀNH CÔNG! Đã lưu {user_count} users vào MongoDB.")
-    logger.info(f"Completed at: {datetime.now()}")
-    logger.info("=" * 60)
     spark.stop()
+    log("=" * 60)
 
 if __name__ == "__main__":
+    # Clear log file
+    open("/tmp/etl_users.log", "w").close()
     run_users_etl()

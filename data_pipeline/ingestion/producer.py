@@ -135,13 +135,16 @@ class MusicStreamPlayer:
                 ts_ms = int(time.time() * 1000)
 
             # 3. Trả về Dictionary đúng chuẩn
+            # Quy tắc: Producer giả lập sẽ auto-set action='complete'
+            duration_ms = int(record.get('duration', 5*60000)) # Default 5 mins
+
             return {
                 "user_id": user_id,
                 "track_id": track_id,
                 "timestamp": ts_ms,          # Kiểu Int (Epoch millis)
-                "action": str(record.get('action', 'listen')), # Mặc định là listen
-                "duration": int(record.get('duration', 5*60000)), # Độ dài hành động hoặc mặc định 5 phút
-                "total_duration": int(record.get('total_duration', 5*60000)), # Tổng độ dài bài hoặc mặc định 5 phút
+                "action": "complete",        # Giả lập: Luôn là complete
+                "duration": duration_ms,     # Thời gian nghe = Total duration (vì complete)
+                "total_duration": duration_ms, 
                 "source": "simulation"       # Tag phân biệt
             }
         except Exception:
