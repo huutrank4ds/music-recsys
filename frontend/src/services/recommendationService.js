@@ -16,7 +16,7 @@ export const fetchRecommendations = async (userId, n=100) => {
     }
 
     const data_dict = await response.json();
-    const data = data_dict.personalized_recommendations;
+    const data = data_dict.recommendations;
     if (!data || data.length === 0) {
       console.warn("API trả về rỗng, dùng dữ liệu mẫu.");
       return defaultSongs;

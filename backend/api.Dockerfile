@@ -8,12 +8,12 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y build-essential && rm -rf /var/lib/apt/lists/*
 
 # 2. Copy file requirements từ máy thật vào
-COPY backend/requirements.txt ./requirements.txt
+COPY requirements.txt ./requirements.txt
 
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 3. Copy thư mục app vào trong /app/app
-COPY backend/app ./app
+COPY app ./app
 
 # 4. Thiết lập PYTHONPATH
 # Đặt là /app để Python hiểu folder 'app' và 'common' là các module
