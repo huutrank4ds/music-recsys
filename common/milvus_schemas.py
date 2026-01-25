@@ -34,3 +34,6 @@ def search_params_milvus():
         "metric_type": "IP",
         "params": {"ef": 100}
     }
+
+def get_milvus_content_embedding_schema():
+    pass

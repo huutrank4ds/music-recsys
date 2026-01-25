@@ -6,7 +6,7 @@ from common.logger import get_logger
 router = APIRouter()
 logger = get_logger("SearchAPI")
 
-# --- 1. Helper Function: Xử lý ObjectId & Rename ---
+# 1. Helper Function: Xử lý ObjectId & Rename 
 def serialize_song(doc: dict) -> dict:
     """
     - Chuyển ObjectId -> str
@@ -19,11 +19,11 @@ def serialize_song(doc: dict) -> dict:
     doc = doc.copy()
     
     if "_id" in doc:
-        doc["id"] = str(doc.pop("_id")) # Cắt _id ra và gán vào id
+        doc["id"] = str(doc.pop("_id")) 
     
     return doc
 
-# --- 2. API Endpoints ---
+# 2. API Endpoints 
 
 @router.get("", summary="Tìm kiếm bài hát (Text Search)")
 async def search_songs(

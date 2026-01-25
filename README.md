@@ -32,7 +32,8 @@ music-recsys/
 │       ├── main.py
 │       ├── api/
 │       │   ├── recs.py
-│       │   └── search.py
+│       │   ├── search.py
+│       │   └── logging.py
 │       ├── core/
 │       │   └── database.py
 │       └── services/
@@ -46,18 +47,17 @@ music-recsys/
 │   ├── processed_sorted/        # Dữ liệu Parquet đã làm sạch (Input cho Model)
 │   ├── songs_master_list/       # File JSON danh sách bài hát (Output bước ETL)
 │   └── checkpoints/             # Spark Streaming Checkpoints
-└── data_pipeline/                      
+└── data_pipeline/                    
     ├── config.py
-    ├── spark.Dockerfile.py
+    ├── spark.Dockerfile
     ├── utils.py
     ├── requirements.txt
-    ├── batch/              
+    ├── batch/            
     │   ├── etl_master_data.py
     │   ├── etl_users.py  
     │   └── import_master_songs.py
     ├── ingestion/
     │   ├── producer.py
-    │   ├── stream_to_mongo.py     
     │   └── stream_to_minio.py
     ├── modeling/
     │   └── train_als_model.py
@@ -65,8 +65,7 @@ music-recsys/
         ├── download_data.py
         ├── preprocess_sort.py
         ├── fix_format.py
-        └── train_als_model.py
-
+        └── fetch_lyrics_lrclib.py
 ```
 
 ## 🗄️ Database Schema Design
@@ -87,8 +86,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `track_id` | String | ID bài hát (Khóa ngoại tham chiếu `songs`). |
 | `timestamp` | **Long** | Thời điểm tương tác (**Epoch Milliseconds**). |
 | `action` | String | Loại hành vi: `listen`, `skip`, `complete`. |
-| `duration` | **Int** | Thời gian bài hát được nghe |
-| `total_duration` | **Int** | Tổng thời lượng bài hát |
+| `duration` | Integer | Thời gian đã nghe (giây). |
+| `total_duration` | Integer | Tổng thời lượng bài hát (giây). |
 | `source` | String | Nguồn dữ liệu: `simulation` (Tool giả lập) hoặc `real_user` (Web App). |
 
 ### Phase 1. MongoDB (Metadata & User Profile)
@@ -97,87 +96,69 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 
 > Lưu trữ thông tin hiển thị (Metadata).
 
-| Field         | Type   | Description                   |
-| :------------ | :----- | :---------------------------- |
-| `_id`       | String | **PK**. Track ID (UUID) |
-| `title`     | String | Tên bài hát                |
-| `artist`    | String | Tên nghệ sĩ                |
-| `artist_id` | String | Mã định danh nghệ sĩ     |
-| `duration_ms` | Int | Thời lượng bài hát |
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `_id` | String | **PK**. Track ID (UUID) |
+| `title` | String | Tên bài hát |
+| `artist` | String | Tên nghệ sĩ |
+| `artist_id` | String | Mã định danh nghệ sĩ |
 | `image_url` | String | Đường dẫn ảnh đại diện bài hát |
 | `url` | String | Đường dẫn đến dữ liệu bài hát |
-| `plays_7d` | Int | Số lượt nghe bài hát trong 7 ngày gần nhất |
-| `plays_cumulative` | Int | Số lượt nghe bài hát từ khi khởi tạo. |
-| `release_date` | String | Ngày khởi tạo bài hát |
 
 #### Collection: `users`
 
 > Lưu trữ vector sở thích người dùng (cập nhật hàng đêm).
 
-| Field             | Type             | Description                              |
-| :---------------- | :--------------- | :--------------------------------------- |
-| `_id`           | String           | **PK**. User ID                    |
-| `username`      | String           | Tên hiển thị                          |
-| `latent_vector` | Array`<Float>` | Vector đặc trưng `[0.1, -0.5, ...]` |
-| `last_updated`  | Date             | Thời gian chạy model gần nhất        |
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `_id` | String | **PK**. User ID |
+| `username` | String | Tên hiển thị |
+| `latent_vector` | Array `<Float>` | Vector đặc trưng `[0.1, -0.5, ...]` |
+| `last_updated` | Date | Thời gian chạy model gần nhất |
 
 ---
 
 ### Phase 2. Milvus (Vector Database)
+#### Collection 1: `music_collection` (Collaborative Filtering)
+> Lưu trữ vector đặc trưng của bài hát từ User Behavior (ALS).
+* **Metric Type:** `IP` (Inner Product).
+* **Dim:** 32 (latent factors).
 
-#### Collection: `music_collection`
-
-> Lưu trữ vector đặc trưng của bài hát để tìm kiếm tương đồng.
-
-* **Metric Type:** `IP` (Inner Product) - *Tương thích với thuật toán ALS.*
-* **Index Type:** `IVF_FLAT` hoặc `HNSW`.
-
-| Field         | Type              | Description                               |
-| :------------ | :---------------- | :---------------------------------------- |
-| `id`        | String            | **PK**. Track ID (Map với MongoDB) |
-| `embedding` | Vector`<Float>` | Item Factors từ Spark ALS                |
+#### Collection 2: `lyrics_embeddings` (Content-Based Filtering)
+> Lưu trữ vector đặc trưng của lời bài hát (Lyrics).
+* **Metric Type:** `IP` (Cosine Similarity).
+* **Dim:** 384 (all-MiniLM-L6-v2).
 
 ## 🔄 Operational Workflow
 
 ### 🔹 Phase 1: Ingestion (Real-time Data Lake)
-
 1. **Event:** User nghe nhạc -> Web App gửi log.
 2. **Transport:** Kafka topic `music_log` nhận message.
-3. **Storage:** Spark Streaming đọc Kafka -> Ghi xuống **MinIO** (Parquet) phân vùng theo ngày.
+3. **Storage:** Spark Streaming đọc Kafka -> Ghi xuống **MinIO** (Parquet).
 
-### 🔹 Phase 2: Batch Training (Nightly Job)
+### 🔹 Phase 2: Batch Training (Collaborative Filtering)
+1. **Load:** Spark đọc Parquet từ MinIO.
+2. **Train:** Chạy thuật toán **ALS**.
+3. **Sync:** Update User Vector (MongoDB) và Item Vector (Milvus `music_collection`).
 
-*Chiến lược Sliding Window: Dùng dữ liệu 90 ngày gần nhất.*
+### 🔹 Phase 3: Content-Based Enrichment
+1. **Fetch:** Lấy lời bài hát (Lyrics) từ **LRCLIB API**.
+2. **Embed:** Dùng **Sentence Transformer** (`all-MiniLM-L6-v2`) tạo vector.
+3. **Sync:** Lưu vector vào Milvus `lyrics_embeddings`.
 
-1. **Load:** Spark đọc Parquet từ MinIO (Filter: `timestamp >= NOW - 90 days`).
-2. **Train:** Chạy thuật toán **ALS (Alternating Least Squares)**.
-3. **Sync User:** Lấy `userFactors` -> Update vào MongoDB collection `users` (`latent_vector`).
-4. **Sync Item:** Lấy `itemFactors` -> Insert/Replace vào Milvus collection `music_collection`.
-
-### 🔹 Phase 3: Serving (Hybrid Vector Search)
+### 🔹 Phase 4: Serving (Hybrid Recommendation)
 
 #### Scenario A: Trang chủ (Home Page)
+*Collaborative Filtering*
+* **Input:** User ID.
+* **Process:** Lấy User Vector -> Search Milvus `music_collection`.
 
-*Mục tiêu: Gợi ý theo sở thích dài hạn.*
+#### Scenario B: Bài tiếp theo (Hybrid Logic)
+*Kết hợp 60% Hành vi + 40% Nội dung*
 
-1. **Backend:** Lấy `user_vector` từ Redis hoặc từ MongoDB (theo User ID).
-2. **Search:** Gửi `user_vector` sang Milvus.
-3. **Query:** `Milvus.search(data=[user_vector], limit=10, metric="IP")`.
-4. **Result:** Join ID kết quả với MongoDB `songs` -> Trả về Frontend.
-
-#### Scenario B: Bài tiếp theo (Next Song / Smart Session)
-
-*Mục tiêu: Gợi ý theo Mood hiện tại + Sở thích gốc.*
-
-1. **Context:** User vừa nghe bài hát **X**.
-2. **Backend:**
-   * Lấy `user_vector` (Sở thích gốc) từ Redis hoặc MongoDB.
-   * Lấy `song_vector_X` (Mood hiện tại) từ Redis.
-3. **Calculation:** Tính Vector Phiên (Session Vector):
-   $$
-   V_{session} = (0.7 \times V_{user}) + (0.3 \times V_{song\_X})
-   $$
-4. **Search:** Gửi $V_{session}$ sang Milvus để tìm các bài hát gần nhất.
+1. **ALS Candidate:** Tìm bài user khác cũng nghe (Milvus `music_collection`).
+2. **Content Candidate:** Tìm bài có lời tương tự (Milvus `lyrics_embeddings`).
+3. **Merge:** Trộn kết quả tỉ lệ 60/40 -> Trả về danh sách.
 
 ## ✅ Implementation Checklist (Tiến độ thực hiện)
 
@@ -208,7 +189,6 @@ Dưới đây là danh sách các hạng mục công việc cần hoàn thành �
   - [X] Spark Structured Streaming đọc từ Kafka.
   - [X] Sink dữ liệu xuống MinIO dưới dạng file `.parquet`.
   - [X] Partition dữ liệu theo ngày (`date=YYYY-MM-DD`).
-  - [X] Update lượt nghe xuống MongoDB.
 
 ### 3. 🧹 ETL & Master Data (Làm sạch & Metadata)
 
@@ -227,7 +207,7 @@ Dưới đây là danh sách các hạng mục công việc cần hoàn thành �
 
 - [X] **Environment Setup**
   - [X] Cài đặt `mongo-spark-connector`, `pymongo`, `pymilvus` trên Spark Worker.
-- [X] **Training Job (`train_als_vector.py`)**
+- [X] **Training Job (`train_als_model.py`)**
   - [X] **Sliding Window:** Chỉ load dữ liệu Parquet 90 ngày gần nhất.
   - [X] **Training:** Huấn luyện mô hình ALS (Alternating Least Squares).
   - [X] **Export Users:** Lưu `userFactors` vào MongoDB (`users` collection).
@@ -239,13 +219,14 @@ Dưới đây là danh sách các hạng mục công việc cần hoàn thành �
 > Mục tiêu: API phục vụ Frontend & Tính toán Vector.
 
 - [X] **Core Logic**
-  - [X] Module kết nối MongoDB & Milvus.
-  - [X] Hàm `vector_search(vector, top_k)`.
+  - [X] Module kết nối MongoDB & Milvus (`database.py`).
+  - [X] Hàm `vector_search(vector, top_k)` (`recommender.py`).
   - [X] Hàm tính toán `session_vector` (Weighted Average).
 - [X] **API Endpoints**
-  - [X] `GET /songs`: Danh sách bài hát (Pagination).
-  - [X] `GET /recommend/home`: Gợi ý trang chủ (User Vector -> Milvus).
-  - [X] `POST /recommend/next`: Gợi ý bài tiếp theo (Session Vector -> Milvus).
+  - [X] `GET /api/v1/search/songs`: Tìm kiếm bài hát.
+  - [X] `GET /api/v1/recs/recommendations/{user_id}`: Gợi ý trang chủ.
+  - [X] `GET /api/v1/recs/next-songs/{user_id}/{song_id}`: Gợi ý bài tiếp theo.
+  - [X] `POST /api/v1/logs/event`: Nhận log từ Web App.
 
 ### 6. 💻 Frontend (Web App)
 

@@ -2,7 +2,8 @@ fastapi
 uvicorn[standard]
 python-dotenv
 motor==3.3.2
-pymongo==4.8.0       # Đã fix lỗi trước
+pymongo==4.8.0
 redis==5.0.1
 pymilvus==2.3.7
-marshmallow==3.21.0  # THÊM DÒNG NÀY ĐỂ FIX LỖI MỚI
+marshmallow==3.21.0
+confluent-kafka

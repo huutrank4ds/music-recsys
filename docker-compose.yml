@@ -84,6 +84,7 @@ services:
       - ./data:/opt/data
       - ./data_pipeline:/opt/src
       - ./common:/opt/src/common
+      - ./src/enrichment:/opt/src/enrichment
     depends_on:
       kafka:
         condition: service_healthy
@@ -145,7 +146,7 @@ services:
       - mongo_data:/data/db
     networks:
       - bigdata-net
-  
+
   # -----------------------------------------------------------
   # 6. JOBS & APPS (Đổi tên & Thêm mới)
   # -----------------------------------------------------------
@@ -153,7 +154,7 @@ services:
   job-sync-master:
     image: my-apache-spark:3.5
     container_name: job-sync-master
-    user: root 
+    user: root
     depends_on:
       - mongodb
       - spark-master
@@ -167,9 +168,9 @@ services:
       - ./common:/opt/src/common
     command: >
       /bin/bash -c "
-        echo '🚀 Starting Master Data Sync Job...';
+        echo 'Starting Master Data Sync Job...';
         python3 -u /opt/src/batch/import_master_songs.py;
-        echo '✅ Sync Success! Sleeping for 24 hours...';
+        echo 'Sync Success! Sleeping for 24 hours...';
         "
     networks:
       - bigdata-net
@@ -216,8 +217,6 @@ services:
       - bigdata-net
     restart: on-failure
 
-
-
   # [APP] Service mới cho Web/API
   backend:
     build:
@@ -229,12 +228,11 @@ services:
     environment:
       - MONGO_URI=mongodb://mongodb:27017
       - REDIS_HOST=redis
-      - MILVUS_HOST=milvus
+      - MILVUS_HOST=milvus-standalone
       - PYTHONPATH=/app
     depends_on:
       - mongodb
       - redis
-      - milvus
     volumes:
       - ./backend/app:/app/app
       - ./common:/app/common
@@ -273,7 +271,7 @@ services:
     networks:
       - bigdata-net
     healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
+      test: [ "CMD", "etcdctl", "endpoint", "health" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -293,7 +291,7 @@ services:
     depends_on:
       - minio
       - etcd
-    command: ["milvus", "run", "standalone"]
+    command: [ "milvus", "run", "standalone" ]
     volumes:
       - milvus_data:/var/lib/milvus
     networks:

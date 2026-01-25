@@ -5,7 +5,7 @@ import numpy as np
 from typing import List, Any, Optional
 from app.core.database import DB
 from common.logger import get_logger
-from common.milvus_schemas import get_milvus_song_embedding_schema, index_params_milvus, search_params_milvus
+from common.milvus_schemas import get_milvus_song_embedding_schema, index_params_milvus, search_params_milvus, get_milvus_content_embedding_schema
 from pymilvus import Collection, utility #type: ignore
 
 logger = get_logger("RecommendationService")
@@ -13,16 +13,25 @@ long_key_prefix = f"user:long:"
 short_key_prefix = f"user:short:"
 time_to_live_seconds = 3600 * 2  # 2 hours
 
+# Collection names
+ALS_COLLECTION = "music_collection"  # ALS item embeddings (Collaborative Filtering)
+CONTENT_COLLECTION = "lyrics_embeddings"  # Lyrics embeddings (Content-Based)
+
+
 class RecommendationService:
-    def __init__(self, collection_name: str = "music_collection"):
-        self.collection_name = collection_name
-        self._collection = None
-        self._milvus_available = True 
+    def __init__(self, als_collection_name: str = ALS_COLLECTION, content_collection_name: str = CONTENT_COLLECTION):
+        self.als_collection_name = als_collection_name
+        self.content_collection_name = content_collection_name
+        self._als_collection = None
+        self._content_collection = None
+        
         self.search_params = search_params_milvus()
+        self._milvus_available = True 
         self.init_milvus_collection()
+        
 
     @property
-    def collection(self) -> Collection | None:
+    def als_collection(self) -> Collection | None:
         """
         PROPERTY: Được gọi mỗi khi cần search.
         Logic:
@@ -30,30 +39,49 @@ class RecommendationService:
         2. Nếu chưa có (do init lỗi) -> Thử kết nối lại (Lazy Load / Retry).
         3. Nếu thử lại vẫn lỗi -> Trả về None (Kích hoạt Fallback Mongo).
         """
-        # Trường hợp 1: Mọi thứ hoàn hảo
-        if self._collection is not None:
-            return self._collection
-
-        # Trường hợp 2: Đã biết chắc là Milvus chết hẳn (Circuit Breaker)
-        if not self._milvus_available:
+        if self._als_collection is not None: # Đã init thành công
+            return self._als_collection
+        if not self._milvus_available: # Init thất bại trước đó
             return None
-
-        # Trường hợp 3: Init thất bại tạm thời, giờ thử kết nối lại (Retry)
         try:
             # Kiểm tra nhẹ
-            if not utility.has_collection(self.collection_name):
+            if not utility.has_collection(self.als_collection_name):
                 logger.warning(f"[Milvus Runtime] Collection chưa tồn tại. Dùng Fallback.")
                 self._milvus_available = False 
                 return None
             
-            # Load lại
-            self._collection = Collection(self.collection_name)
-            self._collection.load()
+            self._als_collection = Collection(self.als_collection_name)
+            self._als_collection.load()
             logger.info(f"[Milvus Runtime] Đã kết nối lại thành công!")
-            return self._collection
+            return self._als_collection
 
         except Exception as e:
             logger.error(f"[Milvus Runtime] Vẫn không kết nối được: {e}")
+            self._milvus_available = False
+            return None
+        
+    @property
+    def content_collection(self) -> Collection | None:
+        """
+        PROPERTY: Collection lyrics embeddings.
+        Logic tương tự als_collection.
+        """
+        if self._content_collection is not None:
+            return self._content_collection
+        if not self._milvus_available:
+            return None
+        try:
+            if not utility.has_collection(self.content_collection_name):
+                logger.warning(f"[Milvus Runtime] Lyrics Collection chưa tồn tại. Dùng Fallback.")
+                self._milvus_available = False 
+                return None
+            
+            self._content_collection = Collection(self.content_collection_name)
+            self._content_collection.load()
+            logger.info(f"[Milvus Runtime] Đã kết nối lại Lyrics Collection thành công!")
+            return self._content_collection
+        except Exception as e:
+            logger.error(f"[Milvus Runtime] Vẫn không kết nối được Lyrics Collection: {e}")
             self._milvus_available = False
             return None
     
@@ -63,33 +91,40 @@ class RecommendationService:
         Nhiệm vụ: Đảm bảo Collection và Index luôn tồn tại.
         """
         try:
-            if not utility.has_collection(self.collection_name):
-                logger.info(f"Creating new collection: {self.collection_name}")
+            if not utility.has_collection(self.als_collection_name):
+                logger.info(f"Creating new collection: {self.als_collection_name}")
                 schema = get_milvus_song_embedding_schema()
-                self._collection = Collection(self.collection_name, schema)
-
-                # Index HNSW rất tốt cho search realtime
+                self._als_collection = Collection(self.als_collection_name, schema)
                 index_params = index_params_milvus()
-
-                self._collection.create_index(field_name="embedding", index_params=index_params)
+                self._als_collection.create_index(field_name="embedding", index_params=index_params)
                 logger.info("Index created successfully.")
             
             else:
-                self._collection = Collection(self.collection_name)
+                self._als_collection = Collection(self.als_collection_name)
+            self._als_collection.load() # Load vào memory
+            logger.info(f"Collection '{self.als_collection_name}' loaded into memory.")
 
-            # 3. LOAD VÀO RAM (Quan trọng để search được ngay)
-            self._collection.load()
-            logger.info(f"Collection '{self.collection_name}' loaded into memory.")
+            if not utility.has_collection(self.content_collection_name):
+                logger.info(f"Creating new collection: {self.content_collection_name}")
+                schema = get_milvus_content_embedding_schema()
+                self._content_collection = Collection(self.content_collection_name, schema)
+                index_params = index_params_milvus()
+                self._content_collection.create_index(field_name="embedding", index_params=index_params)
+                logger.info("Content Index created successfully.")
+            else:
+                self._content_collection = Collection(self.content_collection_name)
+            self._content_collection.load() # Load vào memory
+            logger.info(f"Collection '{self.content_collection_name}' loaded into memory.")
 
         except Exception as e:
             logger.error(f"Failed to initialize Milvus: {e}")
 
-    async def _search_milvus(self, vector: List[float], top_k: int, exclude_ids: Optional[List[Any]] = None) -> List[int]:
+    async def _search_milvus(self, collection: Collection, vector: List[float], top_k: int, exclude_ids: Optional[List[Any]] = None) -> List[int]:
         """
         Hàm search an toàn. Nếu Milvus chưa sẵn sàng, trả về list rỗng.
         """
         # Nếu collection bị None, trả về rỗng ngay
-        if self.collection is None:
+        if collection is None:
             return []
         
         expr = None
@@ -98,7 +133,7 @@ class RecommendationService:
         
         try:
             results = await asyncio.to_thread(
-                self.collection.search,
+                collection.search,
                 data=[vector],
                 anns_field="embedding",
                 param=self.search_params,
@@ -116,6 +151,41 @@ class RecommendationService:
         except Exception as e:
             logger.error(f"[Milvus] Lỗi khi tìm kiếm: {e}")
             return []
+        
+    async def _get_lyrics_similar(self, track_id: str, top_k: int = 10, exclude_ids: Optional[str] = None) -> List[int]:
+        """
+        Tìm bài hát tương tự dựa trên lyrics (Content-Based Filtering)
+        """
+        if self.content_collection is None:
+            return []
+        
+        try:
+            # Get embedding của bài hiện tại
+            result = await asyncio.to_thread(
+                self.content_collection.query,
+                expr=f"id == '{track_id}'",
+                output_fields=["embedding"]
+            )
+            
+            if not result:
+                return []
+            
+            current_embedding = result[0]["embedding"]
+            
+            # Search similar
+            similar_ids = await self._search_milvus(
+                self.content_collection,
+                current_embedding,
+                top_k=top_k + 1,
+                exclude_ids=[track_id]
+            )
+            
+            return similar_ids[:top_k]  
+            
+        except Exception as e:
+            logger.warning(f"Content-based search error: {e}")
+            return []
+
 
     async def get_fallback_songs(self, limit: int = 20, exclude_ids: Optional[List[Any]] = None) -> List[dict]:
         """
@@ -135,7 +205,7 @@ class RecommendationService:
         Gợi ý trang chủ.
         """
         # Nếu Milvus không khả dụng, dùng fallback
-        if self.collection is None:
+        if self.als_collection is None:
             return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
 
         try:
@@ -167,7 +237,7 @@ class RecommendationService:
                 v_home = v_long
 
             # Tìm kiếm trong Milvus
-            candidate_ids = await self._search_milvus(v_home.tolist(), top_k=limit * 2, exclude_ids=exclude_ids)
+            candidate_ids = await self._search_milvus(self.als_collection, v_home.tolist(), top_k=limit * 2, exclude_ids=exclude_ids)
             
             # Nếu kết quả rỗng, dùng fallback
             if not candidate_ids:
@@ -201,7 +271,7 @@ class RecommendationService:
         else:
             exclude_ids = exclude_ids + [current_song_id]
         # Nếu Milvus không khả dụng, dùng fallback
-        if self.collection is None:
+        if self.als_collection is None:
             return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
 
         try:
@@ -209,7 +279,7 @@ class RecommendationService:
             expr = f"id == {current_song_id}" 
             # Dùng asyncio.to_thread để tránh block nếu Milvus query lâu
             res = await asyncio.to_thread(
-                self.collection.query,
+                self.als_collection.query,
                 expr=expr,
                 output_fields=["embedding"]
             )
@@ -245,6 +315,7 @@ class RecommendationService:
 
             # Tìm bài tương tự
             candidate_ids = await self._search_milvus(
+                self.als_collection,
                 v_target.tolist(), 
                 top_k=limit + 1, 
                 exclude_ids=exclude_ids
@@ -271,6 +342,19 @@ class RecommendationService:
             logger.error(f"Error in Next Song: {e}")
             # Lưới an toàn cuối cùng
             return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
+
+    async def get_content_based_recs(self, track_id: str, limit: int = 10):
+        """
+        Pure Content-Based Recommendation.
+        Tìm bài có lyrics tương tự nhất.
+        """
+        similar_ids = await self._get_lyrics_similar(track_id, top_k=limit)
+        
+        if not similar_ids:
+            return []
+        
+        return await DB.db["songs"].find({"_id": {"$in": similar_ids}}).to_list(limit)
+
 
 # --- Singleton Instance ---
 recommender = RecommendationService()
