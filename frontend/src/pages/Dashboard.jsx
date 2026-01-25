@@ -78,7 +78,7 @@ const Dashboard = () => {
               <>
                 {viewList.length > 0 ? (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {viewList.map((song) => (
+                    {viewList.map((song, idx) => (
                       <SongCard key={song._id} song={song} />
                     ))}
                   </div>
