@@ -65,7 +65,7 @@ music-recsys/
         ├── download_data.py
         ├── preprocess_sort.py
         ├── fix_format.py
-        └── train_als_model.py
+        └── fetch_lyrics_lrclib.py
 ```
 
 ## 🗄️ Database Schema Design
@@ -119,60 +119,46 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 ---
 
 ### Phase 2. Milvus (Vector Database)
+#### Collection 1: `music_collection` (Collaborative Filtering)
+> Lưu trữ vector đặc trưng của bài hát từ User Behavior (ALS).
+* **Metric Type:** `IP` (Inner Product).
+* **Dim:** 32 (latent factors).
 
-#### Collection: `music_collection`
-
-> Lưu trữ vector đặc trưng của bài hát để tìm kiếm tương đồng.
-
-* **Metric Type:** `IP` (Inner Product) - *Tương thích với thuật toán ALS.*
-* **Index Type:** `IVF_FLAT` hoặc `HNSW`.
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `id` | String | **PK**. Track ID (Map với MongoDB) |
-| `embedding` | Vector `<Float>` | Item Factors từ Spark ALS |
+#### Collection 2: `lyrics_embeddings` (Content-Based Filtering)
+> Lưu trữ vector đặc trưng của lời bài hát (Lyrics).
+* **Metric Type:** `IP` (Cosine Similarity).
+* **Dim:** 384 (all-MiniLM-L6-v2).
 
 ## 🔄 Operational Workflow
 
 ### 🔹 Phase 1: Ingestion (Real-time Data Lake)
-
 1. **Event:** User nghe nhạc -> Web App gửi log.
 2. **Transport:** Kafka topic `music_log` nhận message.
-3. **Storage:** Spark Streaming đọc Kafka -> Ghi xuống **MinIO** (Parquet) phân vùng theo ngày.
+3. **Storage:** Spark Streaming đọc Kafka -> Ghi xuống **MinIO** (Parquet).
 
-### 🔹 Phase 2: Batch Training (Nightly Job)
+### 🔹 Phase 2: Batch Training (Collaborative Filtering)
+1. **Load:** Spark đọc Parquet từ MinIO.
+2. **Train:** Chạy thuật toán **ALS**.
+3. **Sync:** Update User Vector (MongoDB) và Item Vector (Milvus `music_collection`).
 
-*Chiến lược Sliding Window: Dùng dữ liệu 90 ngày gần nhất.*
+### 🔹 Phase 3: Content-Based Enrichment
+1. **Fetch:** Lấy lời bài hát (Lyrics) từ **LRCLIB API**.
+2. **Embed:** Dùng **Sentence Transformer** (`all-MiniLM-L6-v2`) tạo vector.
+3. **Sync:** Lưu vector vào Milvus `lyrics_embeddings`.
 
-1. **Load:** Spark đọc Parquet từ MinIO (Filter: `timestamp >= NOW - 90 days`).
-2. **Train:** Chạy thuật toán **ALS (Alternating Least Squares)**.
-3. **Sync User:** Lấy `userFactors` -> Update vào MongoDB collection `users` (`latent_vector`).
-4. **Sync Item:** Lấy `itemFactors` -> Insert/Replace vào Milvus collection `music_collection`.
-
-### 🔹 Phase 3: Serving (Hybrid Vector Search)
+### 🔹 Phase 4: Serving (Hybrid Recommendation)
 
 #### Scenario A: Trang chủ (Home Page)
+*Collaborative Filtering*
+* **Input:** User ID.
+* **Process:** Lấy User Vector -> Search Milvus `music_collection`.
 
-*Mục tiêu: Gợi ý theo sở thích dài hạn.*
+#### Scenario B: Bài tiếp theo (Hybrid Logic)
+*Kết hợp 60% Hành vi + 40% Nội dung*
 
-1. **Backend:** Lấy `user_vector` từ Redis hoặc từ MongoDB (theo User ID).
-2. **Search:** Gửi `user_vector` sang Milvus.
-3. **Query:** `Milvus.search(data=[user_vector], limit=10, metric="IP")`.
-4. **Result:** Join ID kết quả với MongoDB `songs` -> Trả về Frontend.
-
-#### Scenario B: Bài tiếp theo (Next Song / Smart Session)
-
-*Mục tiêu: Gợi ý theo Mood hiện tại + Sở thích gốc.*
-
-1. **Context:** User vừa nghe bài hát **X**.
-2. **Backend:**
-   * Lấy `user_vector` (Sở thích gốc) từ Redis hoặc MongoDB.
-   * Lấy `song_vector_X` (Mood hiện tại) từ Redis.
-3. **Calculation:** Tính Vector Phiên (Session Vector):
-   $$
-   V_{session} = (0.7 \times V_{user}) + (0.3 \times V_{song\_X})
-   $$
-4. **Search:** Gửi $V_{session}$ sang Milvus để tìm các bài hát gần nhất.
+1. **ALS Candidate:** Tìm bài user khác cũng nghe (Milvus `music_collection`).
+2. **Content Candidate:** Tìm bài có lời tương tự (Milvus `lyrics_embeddings`).
+3. **Merge:** Trộn kết quả tỉ lệ 60/40 -> Trả về danh sách.
 
 ## ✅ Implementation Checklist (Tiến độ thực hiện)
 

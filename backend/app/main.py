@@ -1,4 +1,4 @@
-from fastapi import FastAPI #type: ignore
+from fastapi import FastAPI 
 from contextlib import asynccontextmanager
 
 # Chỉ import DB và các Router
@@ -12,7 +12,7 @@ logger = get_logger("Backend Main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- STARTUP ---
+    # STARTUP 
     logger.info("[System] Đang khởi động hệ thống...")
     try:
         # Chỉ thực hiện kết nối cơ sở dữ liệu
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
 
     yield # App phục vụ request...
 
-    # --- SHUTDOWN ---
+    #SHUTDOWN 
     logger.info("[System] Đang tắt hệ thống...")
     try:
         if hasattr(DB, "close"):

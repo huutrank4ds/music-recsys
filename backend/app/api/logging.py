@@ -1,20 +1,15 @@
-"""
-API Endpoint để nhận Log hành vi người dùng từ Web App.
-Log được đẩy vào Kafka topic để Spark Streaming xử lý.
-"""
-
 import time
 import json
-from fastapi import APIRouter, HTTPException #type: ignore
-from pydantic import BaseModel, Field #type: ignore
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field 
 from typing import Literal
-from confluent_kafka import Producer #type: ignore
+from confluent_kafka import Producer 
 from common.logger import get_logger
 
 logger = get_logger("Logging_API")
 router = APIRouter()
 
-# ================= SCHEMA =================
+### SCHEMA 
 class UserLogRequest(BaseModel):
     """
     Schema cho log hành vi người dùng.
@@ -33,7 +28,7 @@ class UserLogRequest(BaseModel):
     duration: int = Field(0, ge=0, description="Thời gian đã nghe (ms) - optional cho like/dislike")
     total_duration: int = Field(0, ge=0, description="Tổng thời lượng bài hát (ms) - optional cho like/dislike")
 
-# ================= KAFKA PRODUCER =================
+### KAFKA PRODUCER
 # Singleton Kafka Producer (khởi tạo 1 lần)
 _kafka_producer = None
 
@@ -67,11 +62,11 @@ async def log_user_event(log: UserLogRequest):
         message = {
             "user_id": log.user_id,
             "track_id": log.track_id,
-            "timestamp": int(time.time() * 1000),  # Epoch milliseconds
+            "timestamp": int(time.time() * 1000),  
             "action": log.action,
             "duration": log.duration,
             "total_duration": log.total_duration,
-            "source": "real_user"  # Phân biệt với simulation
+            "source": "real_user" 
         }
         
         # Gửi vào Kafka
@@ -82,7 +77,7 @@ async def log_user_event(log: UserLogRequest):
             topic,
             value=json.dumps(message).encode('utf-8')
         )
-        producer.poll(0)  # Non-blocking flush
+        producer.poll(0)  
         
         logger.info(f"[Log] User={log.user_id} | Track={log.track_id} | Action={log.action}")
         

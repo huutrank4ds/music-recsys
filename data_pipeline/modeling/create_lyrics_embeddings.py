@@ -23,7 +23,7 @@ MONGODB_URI = "mongodb://mongodb:27017"
 MONGO_DB = "music_recsys"
 MONGO_COLLECTION = "songs"
 
-MILVUS_HOST = "milvus"
+MILVUS_HOST = "milvus-standalone"
 MILVUS_PORT = 19530
 MILVUS_COLLECTION = "lyrics_embeddings"  # Collection riêng cho lyrics
 
@@ -41,13 +41,19 @@ MAX_SONGS = None  # None = xử lý tất cả
 
 def setup_milvus_collection(dimension):
     """
-    Tạo Milvus Collection cho Lyrics Embeddings.
+    Tạo hoặc load Milvus Collection cho Lyrics Embeddings.
+    Hỗ trợ RESUME: Nếu collection đã có, load nó lên thay vì xóa.
     """
     connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
     
     if utility.has_collection(MILVUS_COLLECTION):
-        print(f"⚠️ Collection '{MILVUS_COLLECTION}' đã tồn tại. Xóa và tạo lại...")
-        utility.drop_collection(MILVUS_COLLECTION)
+        print(f"ℹ️ Collection '{MILVUS_COLLECTION}' đã tồn tại. Sẽ tiếp tục insert (RESUME mode)...")
+        collection = Collection(MILVUS_COLLECTION)
+        collection.load()
+        print(f"✅ Loaded existing collection. Current entities: {collection.num_entities}")
+        return collection
+    
+    print(f"✨ Creating NEW collection '{MILVUS_COLLECTION}'...")
     
     # Schema
     fields = [
@@ -71,6 +77,28 @@ def setup_milvus_collection(dimension):
     return collection
 
 
+def get_existing_ids(collection):
+    """
+    Lấy danh sách ID đã tồn tại trong Milvus để skip.
+    Lưu ý: Với dữ liệu lớn, query tất cả ID có thể chậm.
+    """
+    print("🔍 Checking existing embeddings to resume...")
+    try:
+        # Nếu collection rỗng
+        if collection.num_entities == 0:
+            return set()
+            
+        # Query ID only (limit max possible needed or iterate)
+        # Ở đây lấy tất cả ID (nếu < 1M thì ổn)
+        res = collection.query(expr="id != ''", output_fields=["id"])
+        existing_ids = set([item['id'] for item in res])
+        print(f"✅ Found {len(existing_ids)} existing embeddings. Will skip these.")
+        return existing_ids
+    except Exception as e:
+        print(f"⚠️ Warning: Could not fetch existing IDs ({e}). Will try to insert all.")
+        return set()
+
+
 def create_lyrics_embeddings():
     """
     Main function: Tạo embeddings từ lyrics và lưu vào Milvus.
@@ -79,38 +107,44 @@ def create_lyrics_embeddings():
     print("🎵 CREATE LYRICS EMBEDDINGS (Content-Based Filtering)")
     print("=" * 60)
     
-    # 1. Load NLP Model
+    # 1. Setup Milvus first
+    print("\n🔗 Connecting to Milvus...")
+    try:
+        milvus_collection = setup_milvus_collection(EMBEDDING_DIM)
+        existing_ids = get_existing_ids(milvus_collection)
+    except Exception as e:
+        print(f"❌ Error connecting to Milvus: {e}")
+        return
+
+    # 2. Load NLP Model
     print(f"\n📚 Loading model: {EMBEDDING_MODEL}...")
     model = SentenceTransformer(EMBEDDING_MODEL)
     print(f"   Embedding dimension: {EMBEDDING_DIM}")
     
-    # 2. Connect to MongoDB
+    # 3. Connect to MongoDB
     print("\n🔗 Connecting to MongoDB...")
     client = MongoClient(MONGODB_URI)
     db = client[MONGO_DB]
     collection = db[MONGO_COLLECTION]
     
-    # 3. Query songs with lyrics
+    # 4. Query songs with lyrics
     query = {
         "lrclib_plain_lyrics": {"$exists": True, "$ne": None, "$ne": ""}
     }
     projection = {"_id": 1, "title": 1, "artist": 1, "lrclib_plain_lyrics": 1}
     
+    print("🔍 Fetching songs from MongoDB...")
     cursor = collection.find(query, projection)
     if MAX_SONGS:
         cursor = cursor.limit(MAX_SONGS)
     
     songs = list(cursor)
     total = len(songs)
-    print(f"📊 Found {total} songs with lyrics")
+    print(f"📊 Found {total} songs with lyrics in MongoDB")
     
     if total == 0:
         print("❌ No songs with lyrics found! Run lyrics enrichment first.")
         return
-    
-    # 4. Setup Milvus
-    print("\n🔗 Setting up Milvus...")
-    milvus_collection = setup_milvus_collection(EMBEDDING_DIM)
     
     # 5. Create embeddings in batches
     print(f"\n🧠 Creating embeddings (batch size={BATCH_SIZE})...")
@@ -118,9 +152,16 @@ def create_lyrics_embeddings():
     ids_batch = []
     embeddings_batch = []
     processed = 0
+    skipped = 0
     
     for song in tqdm(songs, desc="Processing"):
         track_id = str(song["_id"])
+        
+        # Check if already exists
+        if track_id in existing_ids:
+            skipped += 1
+            continue
+            
         lyrics = song.get("lrclib_plain_lyrics", "")
         
         # Skip empty lyrics
@@ -132,72 +173,41 @@ def create_lyrics_embeddings():
             lyrics = lyrics[:5000]
         
         # Create embedding
-        embedding = model.encode(lyrics, normalize_embeddings=True)
-        
-        ids_batch.append(track_id)
-        embeddings_batch.append(embedding.tolist())
-        
-        # Insert batch
-        if len(ids_batch) >= BATCH_SIZE:
-            milvus_collection.insert([ids_batch, embeddings_batch])
-            processed += len(ids_batch)
-            ids_batch = []
-            embeddings_batch = []
+        try:
+            embedding = model.encode(lyrics, normalize_embeddings=True)
+            
+            ids_batch.append(track_id)
+            embeddings_batch.append(embedding.tolist())
+            
+            # Insert batch
+            if len(ids_batch) >= BATCH_SIZE:
+                milvus_collection.insert([ids_batch, embeddings_batch])
+                processed += len(ids_batch)
+                ids_batch = []
+                embeddings_batch = []
+        except Exception as e:
+            print(f"⚠️ Error encoding song {track_id}: {e}")
+            continue
     
     # Insert remaining
     if ids_batch:
         milvus_collection.insert([ids_batch, embeddings_batch])
         processed += len(ids_batch)
     
-    # 6. Load collection for searching
+    # 6. Flush and load
+    milvus_collection.flush()
     milvus_collection.load()
     
     print("\n" + "=" * 60)
     print(f"✅ COMPLETED!")
-    print(f"   Total songs with lyrics: {total}")
-    print(f"   Embeddings created: {processed}")
-    print(f"   Milvus collection: {MILVUS_COLLECTION}")
+    print(f"   Total songs in DB: {total}")
+    print(f"   Already existed (skipped): {skipped}")
+    print(f"   Newly created & inserted: {processed}")
+    print(f"   Total in Milvus: {milvus_collection.num_entities}")
     print("=" * 60)
     
     client.close()
     connections.disconnect("default")
-
-
-def search_similar_by_lyrics(track_id: str, top_k: int = 10):
-    """
-    Tìm bài hát tương tự dựa trên lyrics embedding.
-    Dùng cho Next Song recommendation.
-    """
-    connections.connect(host=MILVUS_HOST, port=MILVUS_PORT)
-    collection = Collection(MILVUS_COLLECTION)
-    collection.load()
-    
-    # Get embedding của bài hiện tại
-    result = collection.query(
-        expr=f"id == '{track_id}'",
-        output_fields=["embedding"]
-    )
-    
-    if not result:
-        print(f"❌ Track {track_id} not found in lyrics embeddings")
-        return []
-    
-    current_embedding = result[0]["embedding"]
-    
-    # Search similar
-    search_params = {"metric_type": "IP", "params": {"nprobe": 10}}
-    results = collection.search(
-        data=[current_embedding],
-        anns_field="embedding",
-        param=search_params,
-        limit=top_k + 1,  # +1 vì sẽ loại bỏ bài hiện tại
-        output_fields=["id"]
-    )
-    
-    similar_ids = [hit.id for hit in results[0] if hit.id != track_id][:top_k]
-    
-    connections.disconnect("default")
-    return similar_ids
 
 
 if __name__ == "__main__":
