@@ -1,4 +1,5 @@
-from pyspark.sql.types import StructType, StructField, StringType, LongType, IntegerType
+from pyspark.sql.types import StructType, StructField, StringType, LongType, IntegerType, DoubleType, ArrayType
+
 
 def get_music_log_schema():
     return StructType([
@@ -26,4 +27,16 @@ def get_song_master_schema():
         StructField("duration_ms", IntegerType(), True),
         StructField("plays_7d", IntegerType(), True),
         StructField("plays_cumulative", LongType(), True)
+    ])
+
+def get_user_schema():
+    """
+    Schema cho danh sách user.
+    Dùng cho Job Import Users để đảm bảo đúng kiểu dữ liệu.
+    """
+    return StructType([
+        StructField("_id", StringType(), True),
+        StructField("user_name", StringType(), True),
+        StructField("latent_vector", ArrayType(DoubleType()), True),
+        StructField("last_updated", LongType(), True)
     ])

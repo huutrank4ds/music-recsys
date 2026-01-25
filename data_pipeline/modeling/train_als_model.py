@@ -13,8 +13,8 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lit, current_timestamp, udf, expr
 from pyspark.sql.types import ArrayType, FloatType, StringType
 from pyspark.ml.recommendation import ALS
-from pymongo import MongoClient, UpdateOne
-from pymilvus import (
+from pymongo import MongoClient, UpdateOne # type: ignore
+from pymilvus import ( #type: ignore
     connections,
     Collection,
     FieldSchema,

@@ -5,7 +5,7 @@ from pyspark.sql.types import StringType, IntegerType, LongType, StructType, Str
 import hashlib
 import urllib.parse
 from common.logger import get_logger
-from common.schemas import get_music_log_schema, get_song_master_schema
+from common.spark_schemas import get_music_log_schema, get_song_master_schema
 
 logger = get_logger("Extract_Master_Data")
 FIXED_YOUTUBE_URL = "JfVos4VSpmA" 

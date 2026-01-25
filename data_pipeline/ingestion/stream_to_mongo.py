@@ -6,7 +6,7 @@ Spark Streaming ETL - Kafka to MongoDB
 
 from pyspark.sql.functions import from_json, col
 from pymongo import MongoClient, UpdateOne #type: ignore
-from common.schemas import get_music_log_schema
+from common.spark_schemas import get_music_log_schema
 from common.logger import get_logger
 from utils import get_spark_session, GracefulStopper
 import config as cfg
