@@ -70,7 +70,7 @@ async def get_song_detail(song_id: str):
         }
         
     except HTTPException:
-        raise # Ném lại lỗi 404
+        raise 
     except Exception as e:
         logger.error(f"Lỗi khi lấy chi tiết bài hát: {e}")
         raise HTTPException(status_code=500, detail="Lỗi hệ thống")
