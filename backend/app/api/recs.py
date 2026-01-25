@@ -4,6 +4,11 @@ from app.services.recommender import RecommendationService
 router = APIRouter()
 recs = RecommendationService()  
 
+<<<<<<< HEAD
+@router.get("/recommendations/{user_id}/n={n}")
+async def get_recommendations(user_id: str, n: int = 20):
+    personalized_recs = await recs.get_personalized_recs(user_id, limit=n)
+=======
 @router.get("/recommendations/{user_id}")
 async def get_recommendations(user_id: str):
     """
@@ -11,6 +16,7 @@ async def get_recommendations(user_id: str):
     Dựa trên user profile vector từ ALS model.
     """
     personalized_recs = await recs.get_personalized_recs(user_id)
+>>>>>>> 93888aabe9b70bc04a04a282dc369eb1310abdca
     
     return {
         "user_id": user_id,
@@ -18,6 +24,11 @@ async def get_recommendations(user_id: str):
         "recommendations": personalized_recs,
     }
 
+<<<<<<< HEAD
+@router.get("/next-songs/{user_id}/{current_song_id}/n={n}")
+async def get_next_songs(user_id: str, current_song_id: str, n: int = 20):
+    next_songs = await recs.get_next_songs(user_id, current_song_id, limit=n)
+=======
 @router.get("/next-songs/{user_id}/{current_song_id}")
 async def get_next_songs(user_id: str, current_song_id: str):
     """
@@ -25,6 +36,7 @@ async def get_next_songs(user_id: str, current_song_id: str):
     Kết hợp 60% Collaborative Filtering + 40% Content-Based (Lyrics).
     """
     next_songs = await recs.get_next_songs(user_id, current_song_id)
+>>>>>>> 93888aabe9b70bc04a04a282dc369eb1310abdca
     
     return {
         "user_id": user_id,

@@ -14,8 +14,8 @@ from pyspark.sql.window import Window
 from pyspark.sql.functions import dense_rank
 from pyspark.sql.types import ArrayType, FloatType
 from pyspark.ml.recommendation import ALS
-from pymongo import MongoClient, UpdateOne
-from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
+from pymongo import MongoClient, UpdateOne #type: ignore
+from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility #type: ignore
 
 # ============================================================
 # CONFIGURATION

@@ -17,7 +17,7 @@ OUTPUT_FILE = OUTPUT_DIR / "songs.json"
 META_FILE = OUTPUT_DIR / "metadata.json"
 
 BATCH_SIZE = 100000
-FIXED_YOUTUBE_URL = "JfVos4VSpmA" # Nhạc Lofi mặc định
+FIXED_YOUTUBE_URL = "IDksv0Z-dTk"
 
 # Hàm tạo ảnh bìa với màu cố định dựa trên tên bài hát
 def generate_cover(title):
@@ -28,7 +28,7 @@ def generate_cover(title):
     bg = hash_object.hexdigest()[:6]
     # Encode tên bài hát cho URL
     safe_name = urllib.parse.quote(str(title))
-    return f"https://ui-avatars.com/api/?name={safe_name}&background={bg}&color=fff&size=512&length=1&bold=true"
+    return f"https://ui-avatars.com/api/?name={safe_name}&background={bg}&color=fff&size=512&length=1&bold=true&font-size=0.7"
 
 def main():
     logger.info(f"[Extract] Bắt đầu xử lý Metadata (Batch Size: {BATCH_SIZE})...")

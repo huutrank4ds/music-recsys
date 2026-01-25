@@ -168,16 +168,16 @@ services:
       - ./common:/opt/src/common
     command: >
       /bin/bash -c "
-        echo '🚀 Starting Master Data Sync Job...';
+        echo 'Starting Master Data Sync Job...';
         python3 -u /opt/src/batch/import_master_songs.py;
-        echo '✅ Sync Success! Sleeping for 24 hours...';
+        echo 'Sync Success! Sleeping for 24 hours...';
         "
     networks:
       - bigdata-net
 
   job-producer:
     image: my-apache-spark:3.5
-    container_name: music_log_producer
+    container_name: music-log-producer
     depends_on:
       - kafka
     env_file:
@@ -195,7 +195,7 @@ services:
 
   job-consumer:
     image: my-apache-spark:3.5
-    container_name: music_spark_streaming
+    container_name: music-spark-streaming
     depends_on:
       - kafka
       - spark-master
@@ -220,11 +220,11 @@ services:
   # [APP] Service mới cho Web/API
   backend:
     build:
-      context: .
-      dockerfile: backend/api.Dockerfile
-    container_name: music_backend
+      context: ./backend
+      dockerfile: api.Dockerfile
+    container_name: music-backend
     ports:
-      - "8000:8000"
+      - "${WEB_APP_PORT}:8000"
     environment:
       - MONGO_URI=mongodb://mongodb:27017
       - REDIS_HOST=redis
@@ -237,6 +237,23 @@ services:
       - ./backend/app:/app/app
       - ./common:/app/common
     command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - bigdata-net
+
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: frontend.Dockerfile
+    container_name: music-frontend
+    env_file:
+      - .env
+    ports:
+      - "${FRONTEND_PORT}:5173"
+    volumes:
+      - ./frontend:/app             
+      - /app/node_modules
+    environment:
+      - CHOKIDAR_USEPOLLING=true    # Hỗ trợ Hot Reload
     networks:
       - bigdata-net
 
@@ -279,10 +296,11 @@ services:
       - milvus_data:/var/lib/milvus
     networks:
       - bigdata-net
+    restart: always
 
   redis:
     image: redis:7.2-alpine
-    container_name: music_recsys_redis
+    container_name: music-recsys-redis
     ports:
       - "6379:6379"
     volumes:
