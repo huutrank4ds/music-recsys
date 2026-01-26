@@ -136,11 +136,14 @@ def sync_data():
         pbar.update(len(operations))
     logger.info(f"[SYNC] HOÀN TẤT! Tổng đã xử lý: {pbar.n:,} dòng.")
     logger.info("[SYNC] Đang kiểm tra và khởi tạo Index cho tìm kiếm...")
-    try:
-        # Tạo Text Index cho title và artist để MusicService.search_songs hoạt động
+    try:    
+        index_keys = [("track_name", "text"), ("artist_name", "text")]
+        index_name = "SongSearchIndex"
+        index_weights = {"track_name": 10, "artist_name": 5}
         col.create_index(
-            [("title", "text"), ("artist", "text")],
-            name="SongSearchIndex",
+            index_keys,
+            name=index_name,
+            weights=index_weights,
             background=True 
         )
         logger.info("[SYNC] XONG!")

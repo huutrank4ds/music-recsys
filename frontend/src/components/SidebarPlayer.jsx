@@ -1,12 +1,27 @@
 import { useMusic } from '../context/MusicContext';
 import ReactPlayer from 'react-player/youtube';
-import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, ListMusic } from 'lucide-react';
+// 1. Import thêm icon Loader2
+import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, ListMusic, Loader2 } from 'lucide-react';
 import { useState } from 'react';
+
+// 2. Component con: Skeleton Loading (Hiệu ứng khung xương nhấp nháy)
+const SidebarSkeleton = () => (
+  <div className="flex items-center gap-2 p-2 rounded-lg animate-pulse">
+    <div className="w-10 h-10 bg-gray-700 rounded" /> {/* Ảnh giả */}
+    <div className="flex-1 min-w-0 space-y-2">
+      <div className="h-3 bg-gray-700 rounded w-3/4" /> {/* Tên bài giả */}
+      <div className="h-2 bg-gray-700 rounded w-1/2" /> {/* Nghệ sĩ giả */}
+    </div>
+  </div>
+);
 
 const SidebarPlayer = () => {
   const {
     currentSong,
     isPlaying,
+    isSidebarLoading, // Biến loading từ Context
+    sidebarHasMore,
+    fetchRecommendNextSongs,
     togglePlay,
     playNext,
     playPrevious,
@@ -37,7 +52,6 @@ const SidebarPlayer = () => {
   };
 
   const toggleMute = () => {
-    // Nếu volume đang là 0 mà bấm nút loa -> Tự động bật lên 50%
     if (volume === 0 && !isMuted) {
       handleVolumeChange(0.5);
       setIsMuted(false);
@@ -46,29 +60,30 @@ const SidebarPlayer = () => {
     }
   };
 
-  // Logic mới: Khi kéo thanh trượt thì tự động bỏ Mute
   const onVolumeSliderChange = (e) => {
     const newVolume = parseFloat(e.target.value);
-    
-    // Nếu đang mute mà kéo thanh trượt -> Bỏ mute
-    if (isMuted) {
-      setIsMuted(false);
-    }
-    
-    // Nếu kéo về 0 -> Tự động bật chế độ mute
-    if (newVolume === 0) {
-      setIsMuted(true);
-    }
-    
+    if (isMuted) setIsMuted(false);
+    if (newVolume === 0) setIsMuted(true);
     handleVolumeChange(newVolume);
   };
 
   const effectiveVolume = isMuted ? 0 : volume;
   const nextSongs = playlist.slice(currentIndex + 1);
 
+  const handdleScrollNextSongs = (e) => {
+    if (isSidebarLoading || !sidebarHasMore) return;
+    const { scrollTop, scrollHeight, clientHeight } = e.target;
+    // Tăng ngưỡng lên 20px để nhạy hơn chút
+    const isNearBottom = scrollHeight - scrollTop <= clientHeight + 20;
+    
+    if (!isNearBottom) return;
+    const currentSongId = currentSong ? currentSong._id : null;
+    if (!currentSongId) return;
+    fetchRecommendNextSongs(currentSongId, false);
+  }
+
   return (
     <div className="fixed right-0 top-0 w-80 h-screen bg-gray-800 border-l border-gray-700 flex flex-col z-20 hidden lg:flex">
-      {/* Hidden YouTube Player */}
       <ReactPlayer
         key={currentSong ? currentSong._id : 'no-song'}
         ref={playerRef}
@@ -88,11 +103,10 @@ const SidebarPlayer = () => {
         }}
       />
 
-      {/* Now Playing Section */}
+      {/* Now Playing Section (Giữ nguyên) */}
       <div className="p-4 border-b border-gray-700">
         <h3 className="text-xs text-gray-400 mb-3 uppercase tracking-wider">Now Playing</h3>
         
-        {/* Vinyl Record */}
         <div className="relative mb-3 mx-auto" style={{ width: '180px', height: '180px' }}>
           <div className={`w-full h-full relative ${isPlaying ? 'animate-spin-slow' : ''}`}>
             <div className="w-full h-full rounded-full overflow-hidden shadow-2xl">
@@ -114,7 +128,6 @@ const SidebarPlayer = () => {
           </div>
         </div>
 
-        {/* Song Info */}
         <div className="text-center mb-3">
           <h2 className="text-base font-bold text-white mb-1 truncate">
             {currentSong.track_name}
@@ -122,7 +135,6 @@ const SidebarPlayer = () => {
           <p className="text-gray-400 text-xs truncate">{currentSong.artist_name}</p>
         </div>
 
-        {/* Progress Bar */}
         <div className="space-y-1">
           <input
             type="range"
@@ -139,10 +151,7 @@ const SidebarPlayer = () => {
           </div>
         </div>
 
-        {/* Playback Controls */}
         <div className="flex items-center justify-between mt-3">
-          
-          {/* --- VOLUME CONTROL FIX START --- */}
           <div
             className="relative"
             onMouseEnter={() => setShowVolumeSlider(true)}
@@ -165,8 +174,6 @@ const SidebarPlayer = () => {
                   <div className="flex flex-col gap-2 w-36">
                     <div className="flex items-center gap-2">
                       <Volume2 className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      
-                      {/* SLIDER ĐÃ SỬA: Value phụ thuộc vào isMuted */}
                       <input
                         type="range"
                         min="0"
@@ -185,7 +192,6 @@ const SidebarPlayer = () => {
               </div>
             )}
           </div>
-          {/* --- VOLUME CONTROL FIX END --- */}
 
           <div className="flex items-center gap-2">
             <button onClick={playPrevious} className="p-2 hover:bg-gray-700 rounded-full transition-colors">
@@ -215,19 +221,50 @@ const SidebarPlayer = () => {
           <span className="text-xs text-gray-500">{nextSongs.length} bài</span>
         </div>
         
-        <div className="space-y-2 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-600" style={{ maxHeight: '240px' }}>
-          {nextSongs.length > 0 ? (
-            nextSongs.map((song, idx) => (
-              <div key={song.id || song._id || 'song'} onClick={() => playFromPlaylist(idx + currentIndex + 1)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer group">
-                <img src={song.image_url} alt={song.track_name} className="w-10 h-10 rounded object-cover" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-white truncate group-hover:text-primary-400 transition-colors">{song.track_name}</p>
-                  <p className="text-xs text-gray-400 truncate">{song.artist_name}</p>
-                </div>
-              </div>
-            ))
+        {/* --- 3. LOGIC HIỂN THỊ DANH SÁCH & LOADING --- */}
+        <div 
+          className="space-y-2 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-600" 
+          style={{ maxHeight: '240px' }}
+          onScroll={handdleScrollNextSongs}
+        >
+          {/* A. Nếu danh sách đang trống VÀ đang loading -> Hiện Skeleton (Loading ban đầu) */}
+          {nextSongs.length === 0 && isSidebarLoading ? (
+            <>
+              <SidebarSkeleton />
+              <SidebarSkeleton />
+              <SidebarSkeleton />
+              <SidebarSkeleton />
+            </>
           ) : (
-            <p className="text-gray-500 text-xs text-center py-4">Không còn bài hát</p>
+            <>
+              {/* B. Render danh sách bài hát */}
+              {nextSongs.map((song, idx) => (
+                <div key={song.id || song._id || idx} onClick={() => playFromPlaylist(idx + currentIndex + 1)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer group">
+                  <img src={song.image_url} alt={song.track_name} className="w-10 h-10 rounded object-cover" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-white truncate group-hover:text-primary-400 transition-colors">{song.track_name}</p>
+                    <p className="text-xs text-gray-400 truncate">{song.artist_name}</p>
+                  </div>
+                </div>
+              ))}
+
+              {/* C. Nếu có bài VÀ đang loading -> Hiện Spinner ở đáy (Load more) */}
+              {nextSongs.length > 0 && isSidebarLoading && (
+                <div className="py-2 flex justify-center w-full">
+                  <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
+                </div>
+              )}
+
+              {/* D. Nếu không loading VÀ hết danh sách -> Hiện thông báo */}
+              {!isSidebarLoading && !sidebarHasMore && nextSongs.length > 0 && (
+                <p className="text-gray-500 text-[10px] text-center py-2 italic">~ Hết danh sách ~</p>
+              )}
+               
+               {/* E. Trường hợp không có gì cả */}
+               {!isSidebarLoading && nextSongs.length === 0 && (
+                 <p className="text-gray-500 text-xs text-center py-4">Chưa có gợi ý</p>
+               )}
+            </>
           )}
         </div>
       </div>

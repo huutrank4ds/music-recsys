@@ -2,8 +2,10 @@ from app.core.database import DB
 from typing import List, Optional, Any
 from pymongo.errors import OperationFailure #type: ignore
 from common.logger import get_logger
+import os
 
 logger = get_logger("MusicService")
+COLLECTION_NAME = os.getenv("COLLECTION_SONGS", "songs")
 
 class MusicService:
     _instance = None
@@ -15,77 +17,94 @@ class MusicService:
 
     async def create_indexes(self):
         """
-        Hàm tiện ích để tạo Index nếu chưa có.
-        Nên gọi hàm này 1 lần lúc start server (trong file main.py).
+        Tạo Text Index cho collection songs (Giữ nguyên)
         """
         try:
-            # Tạo Text Index cho trường 'title' và 'artist' để search
-            await DB.db["songs"].create_index(
-                [("title", "text"), ("artist", "text")],
-                name="song_search_index",
-                weights={"title": 10, "artist": 5} # Ưu tiên tên bài hát hơn tên ca sĩ
+            await DB.db[COLLECTION_NAME].create_index(
+                [("track_name", "text"), ("artist_name", "text")],
+                name="song_search_index_v2",
+                weights={"track_name": 10, "artist_name": 5}
             )
-            logger.info("Created Text Index for Songs")
+            logger.info("Created Text Index for Songs (track_name, artist_name)")
         except Exception as e:
             logger.warning(f"Index creation warning: {e}")
 
-    async def search_songs(self, query: str, limit: int = 20, skip: int = 0) -> List[dict]:
-        """
-        Tìm kiếm bài hát Full-text Search.
-        """
+    async def search_songs(self, query: str, limit: int, skip: int) -> Any:
         if not query:
-            return []
-
-        try:
-            # 1. Query chuẩn
-            filter_query = {"$text": {"$search": query}}
-            projection = {
-                "score": {"$meta": "textScore"}, 
-                "title": 1, "artist": 1, "image_url": 1, "id": 1 # Chỉ lấy trường cần thiết
+            return {
+                "data": [],
+                "meta": {"has_more": False, "limit": limit, "skip": skip}
             }
 
-            cursor = DB.db["songs"].find(filter_query, projection)
+        try:
+            pipeline = [
+                {"$match": {"$text": {"$search": query}}}, # Sử dụng $text để tìm kiếm
+                {"$addFields": {"score": {"$meta": "textScore"}}}, # Thêm trường score
+                {"$sort": {"score": -1}}, # Sắp xếp theo score giảm dần
+                {"$skip": skip}, # Bỏ qua số lượng document
+                {"$limit": limit + 1} # Lấy limit + 1 để kiểm tra has_more
+            ]
+
+            cursor = DB.db[COLLECTION_NAME].aggregate(pipeline)
+            songs = await cursor.to_list(length=limit + 1)
             
-            # 2. Sắp xếp theo độ khớp (Score) giảm dần
-            cursor = cursor.sort([("score", {"$meta": "textScore"})])
-            
-            # 3. Phân trang (Skip & Limit)
-            songs = await cursor.skip(skip).limit(limit).to_list(length=limit)
-            return songs
+            if len(songs) > limit:
+                has_more = True
+                songs = songs[:limit]
+            else:
+                has_more = False
+                
+            return {
+                "data": songs,
+                "meta": {
+                    "has_more": has_more,
+                    "limit": limit,
+                    "skip": skip,
+                    "source": "text_index"
+                }
+            }
 
         except OperationFailure as e:
-            # Lỗi này xảy ra nếu quên tạo Text Index
             logger.error(f"MongoDB Text Search Error: {e}")
-            # Fallback: Nếu lỗi text search, dùng Regex search (chậm hơn nhưng an toàn)
-            return await self.search_songs_fallback(query, limit)
+            return await self.search_songs_fallback(query, limit, skip)
 
-    async def search_songs_fallback(self, query: str, limit: int) -> List[dict]:
-        """Tìm kiếm bằng Regex (chậm hơn) khi Text Index bị lỗi"""
+    async def search_songs_fallback(self, query: str, limit: int, skip: int) -> Any:
+        # Fallback dùng Regex
         filter_query = {
             "$or": [
-                {"title": {"$regex": query, "$options": "i"}},
-                {"artist": {"$regex": query, "$options": "i"}}
+                {"track_name": {"$regex": query, "$options": "i"}},
+                {"artist_name": {"$regex": query, "$options": "i"}}
             ]
         }
-        return await DB.db["songs"].find(filter_query).limit(limit).to_list(length=limit)
-
-    async def get_song_by_id(self, song_id: Any) -> Optional[dict]:
-        """
-        Lấy chi tiết bài hát. Tự động xử lý ID dạng int hoặc str.
-        """
-        # Thử tìm với ID gốc
-        song = await DB.db["songs"].find_one({"_id": song_id})
         
-        # Nếu không thấy, thử ép kiểu (vì ID từ URL luôn là string)
-        if not song:
-            try:
-                # Nếu DB lưu ID là Int (ví dụ dataset Million Song)
-                int_id = int(song_id)
-                song = await DB.db["songs"].find_one({"_id": int_id})
-            except ValueError:
-                pass # Không phải số thì thôi
+        # --- BỎ PROJECTION ---
+        # Không truyền tham số projection vào nữa => MongoDB trả về FULL DATA
         
-        return song
+        try:
+            cursor = DB.db[COLLECTION_NAME].find(filter_query) # Lấy tất cả trường (url, duration,...)
+            songs = await cursor.skip(skip).limit(limit + 1).to_list(length=limit + 1)
+            
+            if len(songs) > limit:
+                has_more = True
+                songs = songs[:limit]
+            else:
+                has_more = False
+                
+            return {
+                "data": songs,
+                "meta": {
+                    "has_more": has_more,
+                    "limit": limit,
+                    "skip": skip,
+                    "source": "fallback"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Fallback Search Error: {e}")
+            return {
+                "data": [],
+                "meta": {"has_more": False, "limit": limit, "skip": skip}
+            }
 
-# Instance Singleton
 music_service = MusicService()

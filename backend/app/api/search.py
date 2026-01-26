@@ -1,76 +1,31 @@
-from fastapi import APIRouter, Query, HTTPException #type: ignore
 from typing import List, Optional, Any
+from fastapi import APIRouter, HTTPException, Query #type: ignore
 from app.services.music import music_service
 from common.logger import get_logger
 
-router = APIRouter()
+# Logger nên lấy ở ngoài để tránh khởi tạo lại nhiều lần
 logger = get_logger("SearchAPI")
 
-# 1. Helper Function: Xử lý ObjectId & Rename 
-def serialize_song(doc: dict) -> dict:
-    """
-    - Chuyển ObjectId -> str
-    - Đổi tên '_id' thành 'id' (Frontend React thích điều này)
-    """
-    if not doc:
-        return {}
-        
-    # Tạo copy để không ảnh hưởng dữ liệu gốc nếu cần dùng lại
-    doc = doc.copy()
-    
-    if "_id" in doc:
-        doc["id"] = str(doc.pop("_id")) 
-    
-    return doc
+router = APIRouter()
 
-# 2. API Endpoints 
-
+# API Tìm kiếm
 @router.get("", summary="Tìm kiếm bài hát (Text Search)")
 async def search_songs(
-    q: str = Query(..., min_length=1, description="Từ khóa (Tên bài, Ca sĩ)"),
-    limit: int = Query(default=20, ge=1, le=50, description="Số lượng kết quả"),
-    skip: int = Query(default=0, ge=0, description="Số lượng bỏ qua (Phân trang)")
-):
+    # Khai báo tham số trong hàm, FastAPI tự hiểu là Query Param (?query=...)
+    query: str = Query(..., min_length=1, description="Từ khóa tìm kiếm"),
+    limit: int = Query(15, ge=1, le=100, description="Số lượng bài hát (Mặc định 15)"),
+    skip: int = Query(0, ge=0, description="Số lượng bỏ qua (để phân trang)")
+) -> Any:
     """
-    API tìm kiếm bài hát sử dụng MongoDB Text Index.
+    Tìm kiếm bài hát dựa trên từ khóa.
+    URL gọi sẽ là: /api/search?query=abc&limit=10&skip=0
     """
     try:
-        # Gọi Service
-        raw_songs = await music_service.search_songs(q, limit, skip)
+        # Gọi Service (Service đã trả về đúng format {data, meta} rồi nên return luôn)
+        result = await music_service.search_songs(query, limit, skip)
+        return result
         
-        # Serialize dữ liệu
-        results = [serialize_song(song) for song in raw_songs]
-        
-        return {
-            "status": "success",
-            "query": q,
-            "count": len(results),
-            "data": results
-        }
-
     except Exception as e:
         logger.error(f"Lỗi khi tìm kiếm bài hát: {e}")
-        return {"status": "error", "message": str(e), "data": []}
-
-@router.get("/{song_id}", summary="Lấy chi tiết bài hát")
-async def get_song_detail(song_id: str):
-    """
-    Lấy thông tin chi tiết bài hát bằng ID.
-    Hỗ trợ cả ID dạng chuỗi (MongoDB cũ) và số (Dataset).
-    """
-    try:
-        song = await music_service.get_song_by_id(song_id)
-        
-        if not song:
-            raise HTTPException(status_code=404, detail="Không tìm thấy bài hát")
-            
-        return {
-            "status": "success",
-            "data": serialize_song(song)
-        }
-        
-    except HTTPException:
-        raise # Ném lại lỗi 404
-    except Exception as e:
-        logger.error(f"Lỗi khi lấy chi tiết bài hát: {e}")
-        raise HTTPException(status_code=500, detail="Lỗi hệ thống")
+        # Trả về lỗi 500 nhưng kèm message chung chung để bảo mật
+        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi tìm kiếm")
