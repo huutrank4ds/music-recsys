@@ -1,6 +1,6 @@
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase 
-from pymilvus import connections 
-import redis.asyncio as redis 
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase #type: ignore
+from pymilvus import connections #type: ignore
+import redis.asyncio as redis #type: ignore
 import os
 
 class Database:
@@ -27,10 +27,10 @@ class Database:
         return self._redis
 
     async def connect_to_mongo(self):
-        url = os.getenv("MONGO_URL", "mongodb://mongodb:27017")
+        url = os.getenv("MONGO_URI", "mongodb://mongodb:27017")
         client = AsyncIOMotorClient(url)
         self._client = client
-        self._db = client["music_recsys"]
+        self._db = client[os.getenv("MONGO_DB", "music_recsys")]
         await self._client.admin.command('ping')
         print("Connected to MongoDB")
 

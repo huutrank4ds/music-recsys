@@ -3,23 +3,26 @@ from app.services.recommender import RecommendationService
 
 router = APIRouter()
 recs = RecommendationService()  
+num_default_recs = 32
 
-@router.get("/recommendations/{user_id}/n={n}")
-async def get_recommendations(user_id: str):
+@router.get("/{user_id}")
+async def get_recommendations(user_id: str, limit: int = num_default_recs, refresh: bool = False):
     """
     Gợi ý trang chủ cho user (Collaborative Filtering).
     Dựa trên user profile vector từ ALS model.
     """
-    personalized_recs = await recs.get_personalized_recs(user_id)
-    
+    personalized_recs = await recs.get_home_feed(user_id, limit=limit, refresh=refresh)
+
     return {
-        "recommendations": personalized_recs,
+        "has_more": personalized_recs.get("has_more", False),
+        "recommendations": personalized_recs.get("songs", []),
     }
 
-@router.get("/next-songs/{user_id}/{current_song_id}/n={n}")
-async def get_next_songs(user_id: str, current_song_id: str, n: int = 20):
-    next_songs = await recs.get_next_songs(user_id, current_song_id, limit=n)
+@router.get("/{user_id}/{current_song_id}")
+async def get_next_songs(user_id: str, current_song_id: str, limit: int = num_default_recs, refresh: bool = False):
+    next_songs = await recs.get_next_songs(user_id, current_song_id, limit=limit, refresh=refresh)
     
     return {
-        "next_songs": next_songs,
+        "has_more": next_songs.get("has_more", False),
+        "next_songs": next_songs.get("next_songs", []),
     }

@@ -9,14 +9,23 @@ from common.milvus_schemas import get_milvus_song_embedding_schema, index_params
 from pymilvus import Collection, utility #type: ignore
 
 logger = get_logger("RecommendationService")
-long_key_prefix = f"user:long:"
-short_key_prefix = f"user:short:"
-time_to_live_seconds = 3600 * 2  # 2 hours
+
+# Constants
+LONG_KEY_PREFIX = "user:long:"
+SHORT_KEY_PREFIX = "user:short:"
+KEY_TTL = 3600 * 4  # 4 hours
+
+FEED_KEY_PREFIX = "user:feed:"
+SESSION_KEY_PREFIX = "user:session:"
+SESSION_TTL = 3600  # 1 hour
+
+PLAYLIST_KEY_PREFIX = "user:playlist:"
+PLAYLIST_SESSION_KEY_PREFIX = "user:playlist_session:"
+PLAYLIST_TTL = 3600  # 1 hour
 
 # Collection names
-ALS_COLLECTION = "music_collection"  # ALS item embeddings (Collaborative Filtering)
-CONTENT_COLLECTION = "lyrics_embeddings"  # Lyrics embeddings (Content-Based)
-
+ALS_COLLECTION = "music_collection"
+CONTENT_COLLECTION = "lyrics_embeddings"
 
 class RecommendationService:
     def __init__(self, als_collection_name: str = ALS_COLLECTION, content_collection_name: str = CONTENT_COLLECTION):
@@ -28,104 +37,99 @@ class RecommendationService:
         self.search_params = search_params_milvus()
         self._milvus_available = True 
         self.init_milvus_collection()
-        
 
     @property
     def als_collection(self) -> Collection | None:
-        """
-        PROPERTY: Được gọi mỗi khi cần search.
-        Logic:
-        1. Nếu đã có (từ hàm init) -> Trả về ngay (Siêu nhanh).
-        2. Nếu chưa có (do init lỗi) -> Thử kết nối lại (Lazy Load / Retry).
-        3. Nếu thử lại vẫn lỗi -> Trả về None (Kích hoạt Fallback Mongo).
-        """
-        if self._als_collection is not None: # Đã init thành công
-            return self._als_collection
-        if not self._milvus_available: # Init thất bại trước đó
-            return None
+        if self._als_collection is not None: return self._als_collection
+        if not self._milvus_available: return None
         try:
-            # Kiểm tra nhẹ
             if not utility.has_collection(self.als_collection_name):
-                logger.warning(f"[Milvus Runtime] Collection chưa tồn tại. Dùng Fallback.")
-                self._milvus_available = False 
-                return None
-            
+                logger.warning(f"[Milvus] ALS Collection not found. Fallback.")
+                self._milvus_available = False; return None
             self._als_collection = Collection(self.als_collection_name)
             self._als_collection.load()
-            logger.info(f"[Milvus Runtime] Đã kết nối lại thành công!")
             return self._als_collection
-
         except Exception as e:
-            logger.error(f"[Milvus Runtime] Vẫn không kết nối được: {e}")
-            self._milvus_available = False
-            return None
-        
+            logger.error(f"[Milvus] Connection failed: {e}")
+            self._milvus_available = False; return None
+
     @property
     def content_collection(self) -> Collection | None:
-        """
-        PROPERTY: Collection lyrics embeddings.
-        Logic tương tự als_collection.
-        """
-        if self._content_collection is not None:
-            return self._content_collection
-        if not self._milvus_available:
-            return None
+        if self._content_collection is not None: return self._content_collection
+        if not self._milvus_available: return None
         try:
             if not utility.has_collection(self.content_collection_name):
-                logger.warning(f"[Milvus Runtime] Lyrics Collection chưa tồn tại. Dùng Fallback.")
-                self._milvus_available = False 
-                return None
-            
+                self._milvus_available = False; return None
             self._content_collection = Collection(self.content_collection_name)
             self._content_collection.load()
-            logger.info(f"[Milvus Runtime] Đã kết nối lại Lyrics Collection thành công!")
             return self._content_collection
-        except Exception as e:
-            logger.error(f"[Milvus Runtime] Vẫn không kết nối được Lyrics Collection: {e}")
-            self._milvus_available = False
-            return None
-    
+        except Exception:
+            self._milvus_available = False; return None
+
     def init_milvus_collection(self):
-        """
-        Hàm này được gọi 1 lần duy nhất khi Server khởi động.
-        Nhiệm vụ: Đảm bảo Collection và Index luôn tồn tại.
-        """
         try:
             if not utility.has_collection(self.als_collection_name):
-                logger.info(f"Creating new collection: {self.als_collection_name}")
+                logger.info(f"Creating {self.als_collection_name}")
                 schema = get_milvus_song_embedding_schema()
                 self._als_collection = Collection(self.als_collection_name, schema)
-                index_params = index_params_milvus()
-                self._als_collection.create_index(field_name="embedding", index_params=index_params)
-                logger.info("Index created successfully.")
-            
+                self._als_collection.create_index(field_name="embedding", index_params=index_params_milvus())
             else:
                 self._als_collection = Collection(self.als_collection_name)
-            self._als_collection.load() # Load vào memory
-            logger.info(f"Collection '{self.als_collection_name}' loaded into memory.")
+                self._als_collection.load()
 
             if not utility.has_collection(self.content_collection_name):
-                logger.info(f"Creating new collection: {self.content_collection_name}")
+                logger.info(f"Creating {self.content_collection_name}")
                 schema = get_milvus_content_embedding_schema()
                 self._content_collection = Collection(self.content_collection_name, schema)
-                index_params = index_params_milvus()
-                self._content_collection.create_index(field_name="embedding", index_params=index_params)
-                logger.info("Content Index created successfully.")
+                self._content_collection.create_index(field_name="embedding", index_params=index_params_milvus())
             else:
                 self._content_collection = Collection(self.content_collection_name)
-            self._content_collection.load() # Load vào memory
-            logger.info(f"Collection '{self.content_collection_name}' loaded into memory.")
-
+                self._content_collection.load()
         except Exception as e:
-            logger.error(f"Failed to initialize Milvus: {e}")
+            logger.error(f"Milvus Init Failed: {e}")
 
-    async def _search_milvus(self, collection: Collection, vector: List[float], top_k: int, exclude_ids: Optional[List[Any]] = None) -> List[int]:
-        """
-        Hàm search an toàn. Nếu Milvus chưa sẵn sàng, trả về list rỗng.
-        """
-        # Nếu collection bị None, trả về rỗng ngay
-        if collection is None:
-            return []
+    async def _get_long_vector(self, user_id: str) -> Optional[np.ndarray]:
+        long_key = f"{LONG_KEY_PREFIX}{user_id}"
+        v_long_raw = await DB.redis.get(long_key)
+        if v_long_raw:
+            v_long = np.array(json.loads(v_long_raw))
+            return v_long
+        else:
+            user_data = await DB.db["users"].find_one({"_id": user_id})
+            if not user_data or "latent_vector" not in user_data:
+                return None
+            v_long = np.array(user_data["latent_vector"])
+            await DB.redis.setex(long_key, int(KEY_TTL), json.dumps(v_long.tolist()))
+            return v_long
+        
+    async def _get_short_vector(self, user_id: str, default: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
+        short_key = f"{SHORT_KEY_PREFIX}{user_id}"
+        v_short_raw = await DB.redis.get(short_key)
+        if v_short_raw:
+            v_short = np.array(json.loads(v_short_raw))
+            return v_short
+        else:
+            return default
+        
+    async def _get_embedding_vector(self, collection: Collection, song_id: str) -> Optional[np.ndarray]:
+        if collection is None: return None
+        try:
+            query_result = await asyncio.to_thread(
+                collection.query,
+                expr=f"id == '{song_id}'",
+                output_fields=["embedding"]
+            )
+            if not query_result:
+                return None
+            embedding = np.array(query_result[0]["embedding"])
+            return embedding
+        except Exception as e:
+            logger.error(f"[Milvus] Lỗi lấy embedding cho bài hát {song_id}: {e}")
+            return None
+
+    # Hàm tìm kiếm chung
+    async def _search_milvus(self, collection: Collection, vector: List[float], top_k: int, exclude_ids: Optional[List[Any]] = None) -> dict:
+        if collection is None: return {}
         
         expr = None
         if exclude_ids and len(exclude_ids) > 0:
@@ -141,220 +145,225 @@ class RecommendationService:
                 expr=expr,
                 output_fields=["id"]
             )
-
-            if not results:
-                return []
-
-            ids = [hit.id for hit in results[0]]
-            return ids
-            
+            if not results: return {}
+            score_map = {hit.id: hit.distance for hit in results[0]}
+            return score_map
         except Exception as e:
-            logger.error(f"[Milvus] Lỗi khi tìm kiếm: {e}")
-            return []
-        
-    async def _get_lyrics_similar(self, track_id: str, top_k: int = 10, exclude_ids: Optional[str] = None) -> List[int]:
-        """
-        Tìm bài hát tương tự dựa trên lyrics (Content-Based Filtering)
-        """
-        if self.content_collection is None:
-            return []
-        
+            logger.error(f"[Milvus] Lỗi tìm kiếm theo ALS: {e}")
+            return {}
+
+    async def _get_lyrics_similar(self, vector: List[float], top_k: int = 10, exclude_ids: Optional[List[Any]] = None) -> dict:
+        if self.content_collection is None: return {}
+
+        expr = None
+        if exclude_ids and len(exclude_ids) > 0:
+            expr = f"id not in {exclude_ids}"
         try:
-            # Get embedding của bài hiện tại
-            result = await asyncio.to_thread(
-                self.content_collection.query,
-                expr=f"id == '{track_id}'",
-                output_fields=["embedding"]
+            results = await asyncio.to_thread(
+                self.content_collection.search,
+                data=[vector],
+                anns_field="embedding",
+                param=self.search_params,
+                limit=top_k,
+                expr=expr,
+                output_fields=["id"]
             )
-            
-            if not result:
-                return []
-            
-            current_embedding = result[0]["embedding"]
-            
-            # Search similar
-            similar_ids = await self._search_milvus(
-                self.content_collection,
-                current_embedding,
-                top_k=top_k + 1,
-                exclude_ids=[track_id]
-            )
-            
-            return similar_ids[:top_k]  
-            
+            if not results: return {}
+            score_map = {hit.id: hit.distance for hit in results[0]}
+            return score_map
         except Exception as e:
-            logger.warning(f"Content-based search error: {e}")
-            return []
+            logger.error(f"[Milvus] Lỗi tìm kiếm theo lyrics: {e}")
+            return {}
+        
 
-
-    async def get_fallback_songs(self, limit: int = 20, exclude_ids: Optional[List[Any]] = None) -> List[dict]:
+    async def get_fallback_songs_ids(self, limit: int = 20, exclude_ids: Optional[List[Any]] = None) -> List[str]:
         """
-        SYSTEM FALLBACK: Khi Milvus hỏng hoặc chưa có dữ liệu.
-        Lấy bài hát có lượt nghe cao nhất trong 7 ngày qua (plays_7d).
+        SYSTEM FALLBACK: Lấy ngẫu nhiên IDs từ nhóm Top Trending.
+        Trả về: List[str] (Danh sách các ID)
         """
         query = {}
-        if exclude_ids and len(exclude_ids) > 0:
+        if exclude_ids:
             query["_id"] = {"$nin": exclude_ids}
             
-        # Lấy top thịnh hành từ MongoDB
-        cursor = DB.db["songs"].find(query).sort("plays_7d", -1).limit(limit)
-        return await cursor.to_list(length=limit)
-
-    async def get_personalized_recs(self, user_id: str, limit: int = 20, exclude_ids: Optional[List[Any]] = None):
-        """
-        Gợi ý trang chủ.
-        """
-        # Nếu Milvus không khả dụng, dùng fallback
-        if self.als_collection is None:
-            return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-
-        try:
-            # Lấy vector Long term từ Redis / MongoDB
-            long_key = f"{long_key_prefix}{user_id}"
-            v_long_raw = await DB.redis.get(long_key)
-            
-            if v_long_raw:
-                # Lấy từ Redis
-                v_long = np.array(json.loads(v_long_raw)) 
-            else:
-                # Lấy từ MongoDB
-                user_data = await DB.db["users"].find_one({"_id": user_id})
-                if not user_data or "latent_vector" not in user_data:
-                    logger.info(f"User {user_id}: No latent vector found. Using Fallback.")
-                    return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-                else:
-                    v_long = np.array(user_data["latent_vector"])
-                # Lưu lại vào Redis để lần sau nhanh hơn
-                await DB.redis.setex(long_key, time_to_live_seconds, json.dumps(v_long.tolist()))
-
-            short_key = f"{short_key_prefix}{user_id}"
-            v_short_raw = await DB.redis.get(short_key)
-            
-            if v_short_raw:
-                v_short = np.array(json.loads(v_short_raw))
-                v_home = 0.6 * v_long + 0.4 * v_short
-            else:
-                v_home = v_long
-
-            # Tìm kiếm trong Milvus
-            candidate_ids = await self._search_milvus(self.als_collection, v_home.tolist(), top_k=limit * 2, exclude_ids=exclude_ids)
-            
-            # Nếu kết quả rỗng, dùng fallback
-            if not candidate_ids:
-                logger.warning(f"User {user_id}: Milvus search returned empty. Using Fallback.")
-                return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-
-            selected_ids = random.sample(candidate_ids, min(len(candidate_ids), limit))
-            final_recs = await DB.db["songs"].find({"_id": {"$in": selected_ids}}).to_list(limit)
-            
-            # Nếu MongoDB không tìm thấy đủ bài, bù thêm từ fallback
-            if len(final_recs) < limit:
-                needed = limit - len(final_recs)
-                extras = await self.get_fallback_songs(
-                    needed, 
-                    exclude_ids=(exclude_ids or []) + selected_ids
-                )
-                final_recs.extend(extras)
-
-            return final_recs
-            
-        except Exception as e:
-            logger.error(f"Error in Personal Recs: {e}")
-            return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-
-    async def get_next_songs(self, user_id: str, current_song_id: Any, limit: int = 10, exclude_ids: Optional[List[Any]] = None):
-        """
-        Gợi ý bài tiếp theo.
-        """
-        if not exclude_ids:
-            exclude_ids = [current_song_id]
-        else:
-            exclude_ids = exclude_ids + [current_song_id]
-        # Nếu Milvus không khả dụng, dùng fallback
-        if self.als_collection is None:
-            return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-
-        try:
-            # Lấy vector bài hiện tại từ Milvus
-            expr = f"id == {current_song_id}" 
-            # Dùng asyncio.to_thread để tránh block nếu Milvus query lâu
-            res = await asyncio.to_thread(
-                self.als_collection.query,
-                expr=expr,
-                output_fields=["embedding"]
-            )
-            
-            # Nếu bài này chưa có vector trong Milvus, dùng fallback
-            if not res: 
-                logger.info(f"Song {current_song_id} vector not found. Using Fallback.")
-                return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-                
-            v_current = np.array(res[0]["embedding"])
-
-            # Cập nhật vector Short-term
-            short_key = f"{short_key_prefix}{user_id}"
-            v_short_raw = await DB.redis.get(short_key)
-            
-            if v_short_raw:
-                v_short_old = np.array(json.loads(v_short_raw))
-            else:
-                v_short_old = v_current
-
-            v_short_new = 0.5 * v_current + 0.5 * v_short_old
-            await DB.redis.setex(short_key, time_to_live_seconds/4, json.dumps(v_short_new.tolist()))
-
-            long_key = f"{long_key_prefix}{user_id}"
-            v_long_raw = await DB.redis.get(long_key)
-            
-            if v_long_raw:
-                 v_long = np.array(json.loads(v_long_raw))
-            else:
-                 v_long = np.zeros_like(v_current)
-
-            v_target = 0.7 * v_short_new + 0.3 * v_long
-
-            # Tìm bài tương tự
-            candidate_ids = await self._search_milvus(
-                self.als_collection,
-                v_target.tolist(), 
-                top_k=limit + 1, 
-                exclude_ids=exclude_ids
-            )
-            
-            # Nếu không tìm thấy ai giống -> Fallback
-            if not candidate_ids:
-                return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-            
-            final_ids = candidate_ids[:limit]
-            
-            # Lấy chi tiết bài hát từ MongoDB
-            songs = await DB.db["songs"].find({"_id": {"$in": final_ids}}).to_list(limit)
-            
-            # Safety check: Nếu số lượng bài trả về quá ít, bù thêm bài Trending
-            if len(songs) < limit:
-                needed = limit - len(songs)
-                extras = await self.get_fallback_songs(needed, exclude_ids=exclude_ids)
-                songs.extend(extras)
-                
-            return songs
-
-        except Exception as e:
-            logger.error(f"Error in Next Song: {e}")
-            # Lưới an toàn cuối cùng
-            return await self.get_fallback_songs(limit, exclude_ids=exclude_ids)
-
-    async def get_content_based_recs(self, track_id: str, limit: int = 10):
-        """
-        Pure Content-Based Recommendation.
-        Tìm bài có lyrics tương tự nhất.
-        """
-        similar_ids = await self._get_lyrics_similar(track_id, top_k=limit)
-        
-        if not similar_ids:
+        pool_limit = int(limit * 2)
+        cursor = DB.db["songs"].find(query, {"_id": 1}).sort("plays_7d", -1).limit(pool_limit)
+        candidates = await cursor.to_list(length=pool_limit)
+        if not candidates:
             return []
+        if len(candidates) > limit:
+            selected_docs = random.sample(candidates, limit)
+        else:
+            random.shuffle(candidates)
+            selected_docs = candidates
+
+        return [doc["_id"] for doc in selected_docs]
+
+    # Hàm tạo các id bài hát gợi ý cá nhân hóa
+    async def _generate_personalized_ids(self, user_id: str, limit: int, exclude_ids: Optional[List[Any]] = None) -> List[str]:
+        if self.als_collection is None: return []
+        try:
+            v_long = await self._get_long_vector(user_id)
+            if v_long is None:  
+                return []
+            v_short = await self._get_short_vector(user_id, default=v_long)
+            if v_short is None:
+                v_home = v_long
+            else:
+                v_home = 0.7 * v_long + 0.3 * v_short
+            pool_limit = limit * 2
+            pool_score_map = await self._search_milvus(self.als_collection, v_home.tolist(), top_k=pool_limit, exclude_ids=exclude_ids)
+            pool_ids = list(pool_score_map.keys())
+            if not pool_ids:
+                return []
+            if len(pool_ids) > limit:
+                final_ids = random.sample(pool_ids, limit)
+            else:
+                final_ids = pool_ids
+            return final_ids
         
-        return await DB.db["songs"].find({"_id": {"$in": similar_ids}}).to_list(limit)
+        except Exception as e:
+            logger.error(f"Gen ID Error: {e}")
+            return []
 
+    # Lấy gợi ý cá nhân hóa cho trang chủ
+    async def get_home_feed(self, user_id: str, limit: int = 20, refresh: bool = False) -> dict:
+        feed_key = f"{FEED_KEY_PREFIX}{user_id}"
+        session_key = f"{SESSION_KEY_PREFIX}{user_id}"
+        pool_limit = int(limit * 3)
+        has_more = True
 
-# --- Singleton Instance ---
+        if refresh:
+            await DB.redis.delete(feed_key, session_key)
+
+        current_len = await DB.redis.llen(feed_key)
+        if current_len < limit:
+            seen_ids_bytes = await DB.redis.smembers(session_key)
+            seen_ids = [x.decode('utf-8') for x in seen_ids_bytes] if seen_ids_bytes else []
+
+            new_batch_ids = await self._generate_personalized_ids(
+                user_id, 
+                limit=pool_limit, 
+                exclude_ids=seen_ids
+            )
+            if not new_batch_ids:
+                new_batch_ids = await self.get_fallback_songs_ids(limit=pool_limit, exclude_ids=seen_ids)
+            if not new_batch_ids:
+                has_more = False
+            else:
+                await DB.redis.rpush(feed_key, *new_batch_ids)
+                await DB.redis.expire(feed_key, int(KEY_TTL))
+                
+                await DB.redis.sadd(session_key, *new_batch_ids)
+                await DB.redis.expire(session_key, int(SESSION_TTL))
+
+        # Lấy ID từ Redis
+        song_ids_bytes = await DB.redis.lpop(feed_key, count=limit)
+        song_ids = [x.decode('utf-8') for x in song_ids_bytes]
+        remaining = await DB.redis.llen(feed_key)
+        has_more = True if remaining > 0 else (len(song_ids) >= limit)
+
+        # Không cần sắp xếp ở trang chủ
+        songs = await DB.db["songs"].find({"_id": {"$in": song_ids}}).to_list(length=limit)
+        return {
+            "songs": songs,
+            "has_more": has_more
+        }
+        
+    def _merge_score_maps(self, als_scores: dict, content_scores: dict, limit: int, weight_als: float = 0.5) -> List[str]:
+        """
+        Trộn điểm và trả về danh sách ID đã sắp xếp từ cao xuống thấp.
+        """
+        merged_map = {}
+        all_ids = set(als_scores.keys()) | set(content_scores.keys())
+
+        for key in all_ids:
+            # Lấy điểm (mặc định là 0 nếu không tồn tại)
+            s_als = als_scores.get(key, 0.0)
+            s_content = content_scores.get(key, 0.0)
+
+            weight_content = 1.0 - weight_als
+            merged_score = (s_als * weight_als) + (s_content * weight_content)
+            merged_map[key] = merged_score
+        
+        # Sắp xếp theo điểm từ cao xuống thấp
+        sorted_items = sorted(merged_map.items(), key=lambda item: item[1], reverse=True)
+        sorted_ids = [item[0] for item in sorted_items][:limit]
+        return sorted_ids
+
+    # Get next songs based on current song
+    async def get_next_songs(self, user_id: str, current_song_id: str, limit: int = 10, refresh: bool = False) -> dict:
+        playlist_key = f"{PLAYLIST_KEY_PREFIX}{user_id}"
+        session_key = f"{PLAYLIST_SESSION_KEY_PREFIX}{user_id}"
+        pool_limit = int(limit * 3)
+
+        if refresh:
+            await DB.redis.delete(playlist_key, session_key)
+
+        current_len = await DB.redis.llen(playlist_key)
+        if current_len < limit:
+            seen_ids_bytes = await DB.redis.smembers(session_key)
+            seen_ids = [x.decode('utf-8') for x in seen_ids_bytes] if seen_ids_bytes else []
+            search_exclude_ids = list(seen_ids)
+            if current_song_id:
+                search_exclude_ids.append(current_song_id)
+            
+            v_long = await self._get_long_vector(user_id)
+            if v_long is None:
+                als_score_map = {}
+            else:
+                als_score_map = await self._search_milvus(
+                    self.als_collection,
+                    vector=v_long.tolist(),
+                    top_k=pool_limit,
+                    exclude_ids=search_exclude_ids 
+                )
+            
+            current_song_embedding = await self._get_embedding_vector(self.content_collection, current_song_id)
+            if current_song_embedding is None:
+                content_score_map = {}
+            else:
+                v_short = await self._get_short_vector(user_id, default=current_song_embedding)
+                try:
+                    if v_short is not None and v_short.shape == current_song_embedding.shape:
+                        v_session = 0.5 * v_short + 0.5 * current_song_embedding
+                    else:
+                        v_session = current_song_embedding
+                except Exception:
+                    v_session = current_song_embedding
+
+                content_score_map = await self._get_lyrics_similar(
+                    vector=v_session.tolist(),
+                    top_k=pool_limit,
+                    exclude_ids=search_exclude_ids
+                )
+
+            merged_ids = self._merge_score_maps(als_score_map, content_score_map, limit=pool_limit, weight_als=0.3)
+            if not merged_ids:
+                merged_ids = await self.get_fallback_songs_ids(limit=pool_limit, exclude_ids=search_exclude_ids)
+            if not merged_ids:
+                has_more = False
+            else:
+                await DB.redis.rpush(playlist_key, *merged_ids)
+                await DB.redis.expire(playlist_key, int(PLAYLIST_TTL))
+                await DB.redis.sadd(session_key, *merged_ids)
+                await DB.redis.expire(session_key, int(PLAYLIST_TTL))
+
+        song_ids_bytes = await DB.redis.lpop(playlist_key, count=limit)
+        
+        if not song_ids_bytes:
+            return {"songs": [], "has_more": False}
+        song_ids = [x.decode('utf-8') for x in song_ids_bytes]
+        remaining = await DB.redis.llen(playlist_key)
+        has_more = True if remaining > 0 else (len(song_ids) >= limit)
+
+        docs = await DB.db["songs"].find({"_id": {"$in": song_ids}}).to_list(length=limit)
+        docs_map = {d["_id"]: d for d in docs}
+        songs = [docs_map[sid] for sid in song_ids if sid in docs_map]
+        return {
+            "next_songs": songs,
+            "has_more": has_more
+        }
+            
+
+# Singleton
 recommender = RecommendationService()

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect } from 'react';
-import { fetchRecommendations } from '../services/recommendationService';
+import { fetchRecommendations, fetchNextSongs } from '../services/recommendationService';
 
 const MusicContext = createContext();
 const USER_KEY_STORAGE = 'music_app_user';
@@ -49,15 +49,60 @@ export const MusicProvider = ({ children }) => {
   const [duration, setDuration] = useState(0);
   const [autoPlayNext, setAutoPlayNext] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
+  const [viewHasMore, setViewHasMore] = useState(true);
+  const [isSidebarLoading, setIsSidebarLoading] = useState(false);
+  const [sidebarHasMore, setSidebarHasMore] = useState(true);
   const playerRef = useRef(null);
+  const viewLimit = 20;
+
+  const fetchHomeFeed = async (refresh = false) => {
+    if (isLoading) return; // Chặn spam
+    setIsLoading(true);
+
+    try {
+      // Gọi Service
+      const {songs, has_more} = await fetchRecommendations(currentUser.id, viewLimit, refresh);
+      
+      if (refresh) {
+        setViewList(songs);
+      } else {
+        // Load more: Nối đuôi vào danh sách cũ
+        setViewList(prev => [...prev, ...songs]); 
+      }
+      setViewHasMore(has_more);
+    } catch (err) {
+      console.error("Lỗi lấy home feed:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchRecommendNextSongs = async (currentSongId, refresh = false) => {
+    if (isSidebarLoading) return;
+    setIsSidebarLoading(true);
+    try {
+      const {songs, has_more} = await fetchNextSongs(currentUser.id, currentSongId, viewLimit, refresh);
+      if (refresh) {
+        // Không có chức năng refresh cho sidebar hiện tại
+      } else {  
+        setPlaylist(prev => [...prev, ...songs]);
+      }
+      setSidebarHasMore(has_more);
+    } catch (error) {
+      console.error("Lỗi lấy bài tiếp theo:", error);
+    } finally {
+      setIsSidebarLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (currentUser) {
       const loadDataOnRefresh = async () => {
         setIsLoading(true);
         try {
-          const recommendedSongs = await fetchRecommendations(currentUser.id);
-          setViewList(recommendedSongs);
+          const {songs, has_more} = await fetchRecommendations(currentUser.id, viewLimit, true);
+          setViewList(songs);
+          setViewHasMore(has_more);
         } catch (error) {
           console.error("Lỗi tải lại nhạc:", error);
         } finally {
@@ -85,8 +130,9 @@ export const MusicProvider = ({ children }) => {
     localStorage.setItem(USER_KEY_STORAGE, JSON.stringify(user));
     setCurrentUser(user);
     try {
-      const recommendedSongs = await fetchRecommendations(user.id);
-      setViewList(recommendedSongs);
+      const {songs, has_more} = await fetchRecommendations(user.id, viewLimit, true);
+      setViewList(songs);
+      setViewHasMore(has_more);
     } catch (error) {
       console.error("Failed to load playlist", error);
       setViewList([]);
@@ -117,10 +163,12 @@ export const MusicProvider = ({ children }) => {
     const tempQueue = [...history, song];
     setPlaylist(tempQueue);
     try {
+        setIsSidebarLoading(true);
         const songId = song._id || song.id;
-        const recommendations = await fetchRecommendations(songId);
+        const {songs: recommendations} = await fetchRecommendations(songId);
         const filteredRecs = recommendations.filter(s => (s._id || s.id) !== songId);
         setPlaylist([...history, song, ...filteredRecs]);
+        setIsSidebarLoading(false);
         
     } catch (error) {
         console.error("Lỗi lấy gợi ý:", error);
@@ -201,6 +249,11 @@ export const MusicProvider = ({ children }) => {
     autoPlayNext,
     playerRef,
     isLoading,
+    viewHasMore,
+    isSidebarLoading,
+    sidebarHasMore,
+    fetchHomeFeed,
+    fetchRecommendNextSongs,
     login,
     logout,
     playFromViewList,
