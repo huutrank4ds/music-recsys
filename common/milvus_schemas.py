@@ -35,5 +35,15 @@ def search_params_milvus():
         "params": {"ef": 100}
     }
 
+LYRICS_DIM = 384  # sentence-transformers/all-MiniLM-L6-v2
+
 def get_milvus_content_embedding_schema():
-    pass
+    """
+    Schema cho collection Milvus lưu trữ embedding của lyrics (Content-Based).
+    """
+    fields = [
+        FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=100, is_primary=True, auto_id=False, description="Track ID"),
+        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=LYRICS_DIM, description="SBERT Embedding")
+    ]
+    schema = CollectionSchema(fields, description="Collection lưu trữ vector nội dung bài hát (Lyrics)")
+    return schema

@@ -96,3 +96,4 @@ Thumbs.db
 models/
 verify_*.py
 test_hybrid_api.py
+test_mongo.py
