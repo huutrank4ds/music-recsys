@@ -149,8 +149,9 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 
 ### 🔹 Phase 3: Content-Based Enrichment
 1. **Fetch:** Lấy lời bài hát (Lyrics) từ **LRCLIB API**.
-2. **Embed:** Dùng **Sentence Transformer** (`all-MiniLM-L6-v2`) tạo vector.
-3. **Sync:** Lưu vector vào Milvus `lyrics_embeddings`.
+2. **Clean:** Xóa các bài hát không tìm thấy Lyrics để đảm bảo chất lượng dữ liệu.
+3. **Embed:** Dùng **Sentence Transformer** (`all-MiniLM-L6-v2`) tạo vector.
+4. **Sync:** Lưu vector vào Milvus `lyrics_embeddings`.
 
 ### 🔹 Phase 4: Serving (Hybrid Recommendation)
 

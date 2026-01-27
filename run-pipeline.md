@@ -75,7 +75,13 @@ docker exec -e MONGO_URI=mongodb://mongodb:27017 spark-master python3 -u /opt/sr
 ```
 *Note: Script hỗ trợ resume (bỏ qua bài đã fetch).*
 
-### BƯỚC 9: Create Lyrics Embeddings (~1-2 giờ)
+### BƯỚC 9: Clean Data (Bắt buộc)
+*Xóa các bài hát không có lyric khỏi MongoDB để đảm bảo tính nhất quán (Consistent) trước khi tạo vector.*
+```bash
+docker exec -it -e MONGO_URI="mongodb://mongodb:27017" -e MILVUS_HOST="milvus-standalone" spark-master python3 /opt/src/scripts/clean_and_sync_data.py --yes
+```
+
+### BƯỚC 10: Create Lyrics Embeddings (~1-2 giờ)
 *Tạo vector từ lyrics và lưu vào Milvus.*
 ```bash
 # Đảm bảo Milvus (milvus-standalone) đang chạy
@@ -89,7 +95,7 @@ docker exec -e MONGO_URI=mongodb://mongodb:27017 spark-master python3 -u /opt/sr
 # PHASE 2: SERVING LAYEER (BACKEND API)
 # ================================================================
 
-### BƯỚC 10: Setup Backend
+### BƯỚC 11: Setup Backend
 Backend cần một số thư viện bổ sung.
 ```bash
 # Rebuild nếu cần (Recommended)
@@ -101,7 +107,7 @@ docker exec music_backend pip install confluent-kafka marshmallow
 docker restart music_backend
 ```
 
-### BƯỚC 11: Test API Verification
+### BƯỚC 12: Test API Verification
 Kiểm tra xem API có hoạt động đúng logic Hybrid không.
 ```bash
 # Copy script test vào container
