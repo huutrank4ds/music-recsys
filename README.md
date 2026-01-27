@@ -120,7 +120,6 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `_id` | String | **PK**. User ID |
 | `username` | String | Tên hiển thị |
 | `latent_vector` | Array `<Float>` | Vector đặc trưng `[0.1, -0.5, ...]` |
-| `last_updated` | Date | Thời gian chạy model gần nhất |
 
 ---
 
