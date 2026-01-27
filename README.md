@@ -104,9 +104,9 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `artist_id` | String | Mã định danh nghệ sĩ |
 | `image_url` | String | Đường dẫn ảnh đại diện bài hát |
 | `url` | String | Đường dẫn đến dữ liệu bài hát |
-| `plays_7d` | String | Lượt nghe bài hát trong 7 ngày gần nhất |
-| `plays_cumulative` | String | Lượt nghe bài hát tích lũy |
-| `duration` | String | Thời lượng bài hát (s) |
+| `plays_7d` | Int | Lượt nghe bài hát trong 7 ngày gần nhất |
+| `plays_cumulative` | Long | Lượt nghe bài hát tích lũy |
+| `duration` | Int | Thời lượng bài hát (s) |
 | `release_date` | String | YYYY-MM-DD |
 | `lrclib_plain_lyrics` | String | Lời bài hát |
 | `lrclib_synced_lyrics` | String | Lời bài hát có thông tin thời gian |
