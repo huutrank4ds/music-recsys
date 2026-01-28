@@ -1,54 +1,53 @@
-import { useMusic } from '../context/MusicContext';
+import React, { useState, useEffect } from 'react';
 import ReactPlayer from 'react-player/youtube';
-// 1. Import thêm icon Loader2
-import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, ListMusic, Loader2 } from 'lucide-react';
-import { useState } from 'react';
-
-// 2. Component con: Skeleton Loading (Hiệu ứng khung xương nhấp nháy)
-const SidebarSkeleton = () => (
-  <div className="flex items-center gap-2 p-2 rounded-lg animate-pulse">
-    <div className="w-10 h-10 bg-gray-700 rounded" /> {/* Ảnh giả */}
-    <div className="flex-1 min-w-0 space-y-2">
-      <div className="h-3 bg-gray-700 rounded w-3/4" /> {/* Tên bài giả */}
-      <div className="h-2 bg-gray-700 rounded w-1/2" /> {/* Nghệ sĩ giả */}
-    </div>
-  </div>
-);
+import { useMusic } from '../context/MusicContext';
+import { Play, Pause, SkipForward, SkipBack, Volume2, VolumeX, ListMusic } from 'lucide-react';
 
 const SidebarPlayer = () => {
   const {
-    currentSong,
-    isPlaying,
-    isSidebarLoading, // Biến loading từ Context
-    sidebarHasMore,
-    fetchRecommendNextSongs,
-    togglePlay,
-    playNext,
-    playPrevious,
-    playFromPlaylist,
-    volume,
-    played,
-    duration,
-    playerRef,
-    handleProgress,
-    handleDuration,
-    handleSeek,
-    handleVolumeChange,
-    handleEnded,
-    playlist,
-    currentIndex,
-    autoPlayNext,
+    isSongLoading,
+    currentSong, isPlaying, togglePlay, playNext, playPrevious,
+    volume, playerRef,
+    handleUpdateProgress, // Hàm sync ngầm
+    handleUpdateDuration, // Hàm sync duration
+    handleVolumeChange, 
+    handlePlayerStart,
+    handlePlayerBuffer,
+    handlePlayerBufferEnd,
+    handlePlayerEnded,
+    autoPlayNext, 
     toggleAutoPlayNext,
   } = useMusic();
 
+  // --- LOCAL STATE (Chỉ component này render mỗi giây) ---
+  const [played, setPlayed] = useState(0); 
+  const [duration, setDuration] = useState(0);
+  
   const [isMuted, setIsMuted] = useState(false);
   const [showVolumeSlider, setShowVolumeSlider] = useState(false);
 
-  const formatTime = (seconds) => {
-    if (!seconds || isNaN(seconds)) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  // Reset khi đổi bài
+  useEffect(() => {
+    setPlayed(0);
+  }, [currentSong]);
+
+  // --- HANDLERS CỤC BỘ ---
+  const onProgress = (state) => {
+    // 1. Cập nhật UI ngay lập tức
+    setPlayed(state.played);
+    // 2. Báo cáo về Context (Ref)
+    handleUpdateProgress(state);
+  };
+
+  const onDuration = (dur) => {
+    setDuration(dur);
+    handleUpdateDuration(dur);
+  };
+
+  const onSeek = (e) => {
+    const newValue = parseFloat(e.target.value);
+    setPlayed(newValue);
+    playerRef.current?.seekTo(newValue);
   };
 
   const toggleMute = () => {
@@ -67,46 +66,45 @@ const SidebarPlayer = () => {
     handleVolumeChange(newVolume);
   };
 
-  const effectiveVolume = isMuted ? 0 : volume;
-  const nextSongs = playlist.slice(currentIndex + 1);
+  const formatTime = (seconds) => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
 
-  const handdleScrollNextSongs = (e) => {
-    if (isSidebarLoading || !sidebarHasMore) return;
-    const { scrollTop, scrollHeight, clientHeight } = e.target;
-    // Tăng ngưỡng lên 20px để nhạy hơn chút
-    const isNearBottom = scrollHeight - scrollTop <= clientHeight + 20;
-    
-    if (!isNearBottom) return;
-    const currentSongId = currentSong ? currentSong._id : null;
-    if (!currentSongId) return;
-    fetchRecommendNextSongs(currentSongId, false);
-  }
+  const effectiveVolume = isMuted ? 0 : volume;
+
+  if (!currentSong) return null;
 
   return (
-    <div className="fixed right-0 top-0 w-80 h-screen bg-gray-800 border-l border-gray-700 flex flex-col z-20 hidden lg:flex">
+    <>
+      {/* Player ẩn, chỉ lấy âm thanh và logic thời gian */}
       <ReactPlayer
-        key={currentSong ? currentSong._id : 'no-song'}
+        key={currentSong._id}
         ref={playerRef}
         url={`https://www.youtube.com/watch?v=${currentSong.url}`}
         playing={isPlaying}
         volume={effectiveVolume}
-        onProgress={handleProgress}
-        onDuration={handleDuration}
-        onEnded={handleEnded}
-        width="0"
-        height="0"
+        onStart={handlePlayerStart}
+        onBuffer={handlePlayerBuffer}
+        onBufferEnd={handlePlayerBufferEnd}
+        onProgress={onProgress}
+        onDuration={onDuration}
+        onEnded={handlePlayerEnded}
+        width="0" height="0"
         config={{
           youtube: {
-            playerVars: { showinfo: 0 },
-            origin: window.location.origin,
+            playerVars: { showinfo: 0, origin: window.location.origin, enablejsapi: 1, rel: 0 }
           }
         }}
       />
 
-      {/* Now Playing Section (Giữ nguyên) */}
+      {/* Giao diện Controls */}
       <div className="p-4 border-b border-gray-700">
         <h3 className="text-xs text-gray-400 mb-3 uppercase tracking-wider">Now Playing</h3>
         
+        {/* Disk Animation */}
         <div className="relative mb-3 mx-auto" style={{ width: '180px', height: '180px' }}>
           <div className={`w-full h-full relative ${isPlaying ? 'animate-spin-slow' : ''}`}>
             <div className="w-full h-full rounded-full overflow-hidden shadow-2xl">
@@ -116,6 +114,7 @@ const SidebarPlayer = () => {
                 className="w-full h-full object-cover"
               />
             </div>
+            {/* Hiệu ứng đĩa than */}
             <div className="absolute inset-0 rounded-full" style={{
               background: 'radial-gradient(circle, transparent 20%, rgba(0,0,0,0.1) 20%, rgba(0,0,0,0.1) 22%, transparent 22%, transparent 40%, rgba(0,0,0,0.05) 40%)',
               pointerEvents: 'none'
@@ -128,6 +127,7 @@ const SidebarPlayer = () => {
           </div>
         </div>
 
+        {/* Info */}
         <div className="text-center mb-3">
           <h2 className="text-base font-bold text-white mb-1 truncate">
             {currentSong.track_name}
@@ -135,6 +135,7 @@ const SidebarPlayer = () => {
           <p className="text-gray-400 text-xs truncate">{currentSong.artist_name}</p>
         </div>
 
+        {/* Seek Bar (Local State) */}
         <div className="space-y-1">
           <input
             type="range"
@@ -142,7 +143,7 @@ const SidebarPlayer = () => {
             max="0.999999"
             step="any"
             value={played}
-            onChange={(e) => handleSeek(e.target.value)}
+            onChange={onSeek}
             className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
           />
           <div className="flex justify-between text-xs text-gray-400">
@@ -151,7 +152,9 @@ const SidebarPlayer = () => {
           </div>
         </div>
 
+        {/* Buttons Controls */}
         <div className="flex items-center justify-between mt-3">
+          {/* Volume */}
           <div
             className="relative"
             onMouseEnter={() => setShowVolumeSlider(true)}
@@ -173,13 +176,12 @@ const SidebarPlayer = () => {
                 <div className="bg-gray-900 p-3 rounded-lg shadow-xl border border-gray-700">
                   <div className="flex flex-col gap-2 w-36">
                     <div className="flex items-center gap-2">
-                      <Volume2 className="w-4 h-4 text-gray-400 flex-shrink-0" />
                       <input
                         type="range"
                         min="0"
                         max="1"
                         step="0.01"
-                        value={effectiveVolume} 
+                        value={effectiveVolume}
                         onChange={onVolumeSliderChange}
                         className="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
                       />
@@ -193,11 +195,12 @@ const SidebarPlayer = () => {
             )}
           </div>
 
+          {/* Main Controls */}
           <div className="flex items-center gap-2">
             <button onClick={playPrevious} className="p-2 hover:bg-gray-700 rounded-full transition-colors">
               <SkipBack className="w-5 h-5 text-gray-300" />
             </button>
-            <button onClick={togglePlay} className="p-3 bg-primary-500 hover:bg-primary-600 rounded-full transition-all hover:scale-110 shadow-lg">
+            <button onClick={togglePlay} disabled={isSongLoading} className="p-3 bg-primary-500 hover:bg-primary-600 rounded-full transition-all hover:scale-110 shadow-lg">
               {isPlaying ? <Pause className="w-6 h-6 text-white fill-white" /> : <Play className="w-6 h-6 text-white fill-white" />}
             </button>
             <button onClick={playNext} className="p-2 hover:bg-gray-700 rounded-full transition-colors">
@@ -205,6 +208,7 @@ const SidebarPlayer = () => {
             </button>
           </div>
 
+          {/* Toggle AutoPlay */}
           <button
             onClick={toggleAutoPlayNext}
             className={`p-2 rounded-full transition-colors ${autoPlayNext ? 'bg-primary-500 hover:bg-primary-600 text-white' : 'hover:bg-gray-700 text-gray-400'}`}
@@ -214,61 +218,7 @@ const SidebarPlayer = () => {
           </button>
         </div>
       </div>
-
-      <div className="p-4 flex flex-col flex-1 overflow-hidden">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs text-gray-400 uppercase tracking-wider">Gợi ý tiếp theo</h3>
-          <span className="text-xs text-gray-500">{nextSongs.length} bài</span>
-        </div>
-        
-        {/* --- 3. LOGIC HIỂN THỊ DANH SÁCH & LOADING --- */}
-        <div 
-          className="space-y-2 overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-700 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-gray-600" 
-          style={{ maxHeight: '240px' }}
-          onScroll={handdleScrollNextSongs}
-        >
-          {/* A. Nếu danh sách đang trống VÀ đang loading -> Hiện Skeleton (Loading ban đầu) */}
-          {nextSongs.length === 0 && isSidebarLoading ? (
-            <>
-              <SidebarSkeleton />
-              <SidebarSkeleton />
-              <SidebarSkeleton />
-              <SidebarSkeleton />
-            </>
-          ) : (
-            <>
-              {/* B. Render danh sách bài hát */}
-              {nextSongs.map((song, idx) => (
-                <div key={song.id || song._id || idx} onClick={() => playFromPlaylist(idx + currentIndex + 1)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-700 transition-colors cursor-pointer group">
-                  <img src={song.image_url} alt={song.track_name} className="w-10 h-10 rounded object-cover" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-white truncate group-hover:text-primary-400 transition-colors">{song.track_name}</p>
-                    <p className="text-xs text-gray-400 truncate">{song.artist_name}</p>
-                  </div>
-                </div>
-              ))}
-
-              {/* C. Nếu có bài VÀ đang loading -> Hiện Spinner ở đáy (Load more) */}
-              {nextSongs.length > 0 && isSidebarLoading && (
-                <div className="py-2 flex justify-center w-full">
-                  <Loader2 className="w-5 h-5 animate-spin text-primary-500" />
-                </div>
-              )}
-
-              {/* D. Nếu không loading VÀ hết danh sách -> Hiện thông báo */}
-              {!isSidebarLoading && !sidebarHasMore && nextSongs.length > 0 && (
-                <p className="text-gray-500 text-[10px] text-center py-2 italic">~ Hết danh sách ~</p>
-              )}
-               
-               {/* E. Trường hợp không có gì cả */}
-               {!isSidebarLoading && nextSongs.length === 0 && (
-                 <p className="text-gray-500 text-xs text-center py-4">Chưa có gợi ý</p>
-               )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+    </>
   );
 };
 

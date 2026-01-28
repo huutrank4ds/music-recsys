@@ -13,7 +13,7 @@ def get_logger(name):
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)
         # Định dạng: [Thời gian] - [Tên Module] - [Level] - [Nội dung]
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - [%(name)s] %(message)s')
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         

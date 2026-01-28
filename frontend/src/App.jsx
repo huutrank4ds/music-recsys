@@ -1,22 +1,25 @@
 import { MusicProvider, useMusic } from './context/MusicContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import UserSelection from './pages/UserSelection';
 import Dashboard from './pages/Dashboard';
 
 function AppContent() {
-  const { currentUser } = useMusic();
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen bg-gray-900">
-      {!currentUser ? <UserSelection /> : <Dashboard />}
+      {!user ? <UserSelection /> : <Dashboard />}
     </div>
   );
 }
 
 function App() {
   return (
-    <MusicProvider>
-      <AppContent />
-    </MusicProvider>
+    <AuthProvider>
+      <MusicProvider>
+        <AppContent />
+      </MusicProvider>
+    </AuthProvider>
   );
 }
 

@@ -7,6 +7,7 @@ const SongCard = ({ song }) => {
 
   const handlePlay = () => {
     playFromViewList(song);
+    console.log('Playing song:', song);
   };
 
   return (
@@ -44,8 +45,10 @@ const SongCard = ({ song }) => {
         </h3>
         <p className="text-sm text-gray-400 truncate">{song.artist_name}</p>
         <p className="text-xs text-gray-500">
-          {Math.floor(song.duration_ms / 60000)}:
-          {String(Math.floor((song.duration_ms % 60000) / 1000)).padStart(2, '0')}
+          {/* Tính phút */}
+          {Math.floor((song.duration || 0) / 60)}:
+          {/* Tính giây còn dư và thêm số 0 đằng trước */}
+          {String(Math.floor((song.duration || 0) % 60)).padStart(2, '0')}
         </p>
       </div>
     </div>

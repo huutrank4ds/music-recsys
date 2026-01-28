@@ -1,7 +1,11 @@
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase #type: ignore
 from pymilvus import connections #type: ignore
 import redis.asyncio as redis #type: ignore
+from common.logger import get_logger
 import os
+
+NAME_TASK = "Database Core"
+logger = get_logger(NAME_TASK)
 
 class Database:
     # khai báo kiểu dữ liệu
@@ -32,13 +36,13 @@ class Database:
         self._client = client
         self._db = client[os.getenv("MONGO_DB", "music_recsys")]
         await self._client.admin.command('ping')
-        print("Connected to MongoDB")
+        logger.info("Connected to MongoDB")
 
     async def connect_to_redis(self):
         url = os.getenv("REDIS_URL", "redis://redis:6379")
         self._redis = redis.from_url(url, decode_responses=False)
         await self._redis.ping()
-        print("Connected to Redis")
+        logger.info("Connected to Redis")
 
     def connect_to_milvus(self):
         connections.connect(
@@ -46,7 +50,7 @@ class Database:
             host=os.getenv("MILVUS_HOST", "milvus"), 
             port=os.getenv("MILVUS_PORT", "19530")
         )
-        print("Milvus connection initialized")
+        logger.info("Milvus connection initialized")
 
     async def close(self):
         if self._client:

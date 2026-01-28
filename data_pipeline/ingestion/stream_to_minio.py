@@ -6,7 +6,7 @@ Spark Streaming ETL - Kafka to MinIO
 
 from pyspark.sql.functions import from_json, col, to_timestamp, date_format
 import config as cfg
-from common.spark_schemas import get_music_log_schema
+from common.schemas.spark_schemas import SparkSchemas
 from utils import get_spark_session, ensure_minio_bucket, GracefulStopper
 from common.logger import get_logger
 
@@ -26,7 +26,7 @@ def run_etl():
     ensure_minio_bucket(cfg.DATALAKE_BUCKET, logger=logger)
 
     # Sử dụng schema từ spark_schemas.py
-    schema = get_music_log_schema()
+    schema = SparkSchemas.music_log()
 
     # Đọc dữ liệu từ Kafka
     logger.info(f"[{TASK_NAME}] Đang lắng nghe Kafka Topic '{cfg.KAFKA_TOPIC}'...")

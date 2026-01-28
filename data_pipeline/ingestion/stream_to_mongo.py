@@ -6,17 +6,17 @@ Spark Streaming ETL - Kafka to MongoDB
 
 from pyspark.sql.functions import from_json, col
 from pymongo import MongoClient, UpdateOne #type: ignore
-from common.spark_schemas import get_music_log_schema
+from common.schemas.spark_schemas import SparkSchemas
 from common.logger import get_logger
 from utils import get_spark_session, GracefulStopper
 import config as cfg
 
-TASK_NAME = "Stream_to_Mongo"
+TASK_NAME = "Stream to Mongo"
 logger = get_logger(TASK_NAME)
 
 def update_mongo(batch_df, batch_id):
-    # Chỉ lấy lượt nghe complete
-    valid_plays = batch_df.filter(col("action") == "complete")
+    # Chỉ lấy lượt nghe complete hoặc listen
+    valid_plays = batch_df.filter((col("action") == "complete") | (col("action") == "listen"))
     
     if valid_plays.isEmpty(): return
     agg_counts = valid_plays.groupBy("track_id").count().collect()
@@ -47,7 +47,7 @@ def run_etl():
         .option("subscribe", cfg.KAFKA_TOPIC) \
         .load()
 
-    schema = get_music_log_schema()
+    schema = SparkSchemas.music_log()
     df_parsed = df_kafka.select(from_json(col("value").cast("string"), schema).alias("data")).select("data.*")
     checkpoint_path = f"s3a://{cfg.DATALAKE_BUCKET}/checkpoints/stream_to_mongo/"
 
