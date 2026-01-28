@@ -225,6 +225,8 @@ services:
     container_name: music-backend
     ports:
       - "${WEB_APP_PORT}:8000"
+    env_file:
+      - .env
     environment:
       - MONGO_URI=mongodb://mongodb:27017
       - REDIS_HOST=redis
@@ -233,9 +235,13 @@ services:
     depends_on:
       - mongodb
       - redis
+      - milvus
+      - etcd
+      - kafka
     volumes:
-      - ./backend/app:/app/app
+      - ./backend:/app
       - ./common:/app/common
+      - ./data:/opt/data
     command: python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - bigdata-net

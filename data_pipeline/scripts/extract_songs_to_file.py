@@ -1,11 +1,11 @@
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lit, rand, udf
-from pyspark.sql.types import StringType, IntegerType, LongType, StructType, StructField
+from pyspark.sql.types import StringType
 import hashlib
 import urllib.parse
 from common.logger import get_logger
-from common.spark_schemas import get_music_log_schema, get_song_master_schema
+from common.schemas.spark_schemas import SparkSchemas
 
 logger = get_logger("Extract_Master_Data")
 FIXED_YOUTUBE_URL = "JfVos4VSpmA" 
@@ -75,7 +75,7 @@ def main():
             .withColumn("duration_ms", lit(300000).cast("int")) 
 
         # Sắp xếp lại cột cho đúng chuẩn Schema
-        target_schema = get_song_master_schema()
+        target_schema = SparkSchemas.song_master()
         final_columns = [field.name for field in target_schema.fields]
         df_final = df_enriched.select(*final_columns)
 

@@ -1,10 +1,22 @@
-import { createContext, useContext, useState, useRef, useEffect } from 'react';
+import { createContext, useContext, useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { fetchRecommendations, fetchNextSongs } from '../services/recommendationService';
+import { logUserEvent } from '../services/loggingService';
+import { useAuth } from './AuthContext'; // Giả sử bạn đã tách Auth
 
 const MusicContext = createContext();
-const USER_KEY_STORAGE = 'music_app_user';
 const MUSIC_KEY_STORAGE = 'music_app_music';
+const API_URL_SEND_LOG = 'http://localhost:8000/api/logs/event';
 
+// Hàm helper đưa ra ngoài để tránh khởi tạo lại
+const getSavedState = () => {
+  try {
+    const saved = localStorage.getItem(MUSIC_KEY_STORAGE);
+    return saved ? JSON.parse(saved) : null;
+  } catch (e) {
+    console.error("Lỗi đọc localStorage", e);
+    return null;
+  }
+};
 
 export const useMusic = () => {
   const context = useContext(MusicContext);
@@ -15,59 +27,56 @@ export const useMusic = () => {
 };
 
 export const MusicProvider = ({ children }) => {
-
-  const getSavedState = () => {
-    try {
-      const saved = localStorage.getItem(MUSIC_KEY_STORAGE);
-      return saved ? JSON.parse(saved) : null;
-    } catch (e) {
-      console.error("Lỗi đọc localStorage", e);
-      return null;
-    }
-  };
   const savedState = getSavedState();
-  
-  const [currentUser, setCurrentUser] = useState(() => {
-    const savedUser = localStorage.getItem(USER_KEY_STORAGE);
-    return savedUser ? JSON.parse(savedUser) : null;
-  });
-  const [currentSong, setCurrentSong] = useState(() => {
-    return savedState ? savedState.currentSong : null;
-  });
+  const { user } = useAuth(); // Lấy user từ AuthContext
+
+  // State phát nhạc
   const [isPlaying, setIsPlaying] = useState(false);
-  const [viewList, setViewList] = useState([]);
-  const [playlist, setPlaylist] = useState(() => {
-    return savedState ? savedState.playlist : [];
-  });
-  const [currentIndex, setCurrentIndex] = useState(() => {
-    return savedState ? savedState.currentIndex : 0;
-  });
-  const [volume, setVolume] = useState(() => {
-    return savedState ? savedState.volume : 0.5;
-  });
-  const [played, setPlayed] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [currentSong, setCurrentSong] = useState(() => savedState ? savedState.currentSong : null);
+  const [volume, setVolume] = useState(() => savedState ? savedState.volume : 0.5);
+  const [playlist, setPlaylist] = useState(() => savedState ? savedState.playlist : []);
+  const [currentIndex, setCurrentIndex] = useState(() => savedState ? savedState.currentIndex : 0);
   const [autoPlayNext, setAutoPlayNext] = useState(true);
+  const [isSongLoading, setIsSongLoading] = useState(false);
+
+  // Refs 
+  const playerRef = useRef(null);
+  const progressRef = useRef({ playedSeconds: 0, played: 0, loaded: 0 }); // Lưu tiến độ
+  const durationRef = useRef(0); // Lưu tổng thời lượng
+  const accumulatedTimeRef = useRef(0); // Tính thời gian nghe thực tế
+  const lastStartTimeRef = useRef(0);
+
+  // State cho giao diện feed và sidebar
+  const [viewList, setViewList] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [viewHasMore, setViewHasMore] = useState(true);
+
   const [isSidebarLoading, setIsSidebarLoading] = useState(false);
   const [sidebarHasMore, setSidebarHasMore] = useState(true);
-  const playerRef = useRef(null);
+
   const viewLimit = 20;
+  const sidebarLimit = 15;
 
-  const fetchHomeFeed = async (refresh = false) => {
-    if (isLoading) return; // Chặn spam
+  // Logic lưu trạng thái phát nhạc vào localStorage
+  useEffect(() => {
+    // Lưu trạng thái bài hát hiện tại
+    if (currentSong && playlist.length > 0) {
+      const stateToSave = { playlist, currentSong, currentIndex, volume };
+      localStorage.setItem(MUSIC_KEY_STORAGE, JSON.stringify(stateToSave));
+    }
+  }, [playlist, currentSong, currentIndex, volume]);
+
+  // Logic load data
+  const fetchHomeFeed = useCallback(async (refresh = false) => {
+    if (!user) return;
+    if (isLoading && !refresh) return;
     setIsLoading(true);
-
     try {
-      // Gọi Service
-      const {songs, has_more} = await fetchRecommendations(currentUser.id, viewLimit, refresh);
-      
+      const { songs, has_more } = await fetchRecommendations(user._id, viewLimit, refresh);
       if (refresh) {
         setViewList(songs);
       } else {
-        // Load more: Nối đuôi vào danh sách cũ
-        setViewList(prev => [...prev, ...songs]); 
+        setViewList(prev => [...prev, ...songs]);
       }
       setViewHasMore(has_more);
     } catch (err) {
@@ -75,199 +84,333 @@ export const MusicProvider = ({ children }) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [user, isLoading]);
 
-  const fetchRecommendNextSongs = async (currentSongId, refresh = false) => {
+  // Load nhạc khi user login
+  useEffect(() => {
+    if (user) {
+      fetchHomeFeed(true);
+    } else {
+      setViewList([]);
+      setPlaylist([]);
+      setCurrentSong(null);
+    }
+  }, [user]);
+
+  const fetchRecommendNextSongs = useCallback(async (currentSongId, refresh) => {
     if (isSidebarLoading) return;
     setIsSidebarLoading(true);
     try {
-      const {songs, has_more} = await fetchNextSongs(currentUser.id, currentSongId, viewLimit, refresh);
-      if (refresh) {
-        // Không có chức năng refresh cho sidebar hiện tại
-      } else {  
-        setPlaylist(prev => [...prev, ...songs]);
-      }
+      const { next_songs, has_more } = await fetchNextSongs(user._id, currentSongId, sidebarLimit, refresh);
+      setPlaylist(prev => [...prev, ...next_songs]);
       setSidebarHasMore(has_more);
     } catch (error) {
       console.error("Lỗi lấy bài tiếp theo:", error);
     } finally {
       setIsSidebarLoading(false);
     }
+  }, [user, isSidebarLoading]);
+
+  // Đồng bộ tiến độ và thời lượng từ player
+  const handleUpdateProgress = useCallback((state) => {
+    progressRef.current = state;
+  }, []);
+
+  const handleUpdateDuration = useCallback((duration) => {
+    durationRef.current = duration;
+  }, []);
+
+  // Tạo log snapshot để gửi lên server Kafka
+  const createLogSnapshot = useCallback((triggerType) => {
+    const now = Date.now();
+    let sessionTime = accumulatedTimeRef.current;
+    if (lastStartTimeRef.current > 0) {
+      sessionTime += (now - lastStartTimeRef.current);
+    }
+    const listenSeconds = sessionTime / 1000;
+    if (listenSeconds < 2) return null;
+    const totalSeconds = durationRef.current; // Lấy từ Ref
+
+    const ratio = totalSeconds > 0 ? (listenSeconds / totalSeconds) : 0;
+    let action = "listen";
+
+    if (triggerType === 'auto_ended' || ratio >= 0.9) action = "complete";
+    else if (ratio < 0.5) action = "skip";
+
+    return {
+      user_id: user?._id,
+      track_id: currentSong?._id,
+      action: action,
+      duration: Math.floor(listenSeconds),
+      total_duration: Math.floor(totalSeconds),
+      timestamp: now,
+      source: "real_user"
+    };
+  }, [user, currentSong]);
+
+  const sendLog = async (snapshot) => {
+    if (!snapshot) return;
+    try {
+      await logUserEvent(snapshot);
+    } catch (e) {
+      console.error("Lỗi gửi log:", e);
+    }
   };
 
-  useEffect(() => {
-    if (currentUser) {
-      const loadDataOnRefresh = async () => {
-        setIsLoading(true);
-        try {
-          const {songs, has_more} = await fetchRecommendations(currentUser.id, viewLimit, true);
-          setViewList(songs);
-          setViewHasMore(has_more);
-        } catch (error) {
-          console.error("Lỗi tải lại nhạc:", error);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      loadDataOnRefresh();
+  // Cập nhật bộ đếm thời gian nghe
+  const updateListenTimer = useCallback((state) => {
+    const now = Date.now();
+    if (state === 'play') {
+      lastStartTimeRef.current = now;
+    } else if (state === 'pause') {
+      if (lastStartTimeRef.current) {
+        accumulatedTimeRef.current += (now - lastStartTimeRef.current);
+        lastStartTimeRef.current = 0;
+      }
+    } else if (state === 'reset') {
+      accumulatedTimeRef.current = 0;
+      lastStartTimeRef.current = 0;
     }
   }, []);
 
-  useEffect(() => {
-    if (currentSong && playlist.length > 0) {
-      const stateToSave = {
-        playlist,
-        currentSong,
-        currentIndex,
-        volume
-      };
-      localStorage.setItem(MUSIC_KEY_STORAGE, JSON.stringify(stateToSave));
-    }
-  }, [playlist, currentSong, currentIndex, volume]);
-
-  const login = async (user) => {
-    setIsLoading(true);
-    localStorage.setItem(USER_KEY_STORAGE, JSON.stringify(user));
-    setCurrentUser(user);
-    try {
-      const {songs, has_more} = await fetchRecommendations(user.id, viewLimit, true);
-      setViewList(songs);
-      setViewHasMore(has_more);
-    } catch (error) {
-      console.error("Failed to load playlist", error);
-      setViewList([]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const logout = () => {
-    localStorage.removeItem(USER_KEY_STORAGE); // Xóa user đã lưu
-    localStorage.removeItem(MUSIC_KEY_STORAGE); // Xóa trạng thái nhạc đã lưu
-    setCurrentUser(null);
-    setCurrentSong(null);
-    setIsPlaying(false);
-    setPlaylist([]);
-  };
-
-  const playFromViewList = async (song) => {
-    let history = [];
+  // Các hàm điều khiển phát nhạc
+  const playFromViewList = useCallback(async (song) => {
+    let historyPlaylist = [];
     if (currentSong) {
-        history = [currentSong];
+      historyPlaylist = [currentSong]
+      const snapshot = createLogSnapshot('switch');
+      sendLog(snapshot);
     }
-    setPlayed(0);
     setCurrentSong(song);
     setIsPlaying(true);
-    const newIndex = history.length; 
-    setCurrentIndex(newIndex);
-    const tempQueue = [...history, song];
-    setPlaylist(tempQueue);
+    setPlaylist([...historyPlaylist, song]);
+    setCurrentIndex(historyPlaylist.length);
+    updateListenTimer('reset');
+    setIsSongLoading(true);
     try {
-        setIsSidebarLoading(true);
-        const songId = song._id || song.id;
-        const {songs: recommendations} = await fetchRecommendations(songId);
-        const filteredRecs = recommendations.filter(s => (s._id || s.id) !== songId);
-        setPlaylist([...history, song, ...filteredRecs]);
-        setIsSidebarLoading(false);
-        
-    } catch (error) {
-        console.error("Lỗi lấy gợi ý:", error);
-    }
-  };
+      await fetchRecommendNextSongs(song._id || song.id, true);
+    } catch (e) { console.error(e); }
+  }, [currentSong, createLogSnapshot, fetchRecommendNextSongs, updateListenTimer]);
 
-  const playFromPlaylist = (index) => {
+  const playFromPlaylist = useCallback(async (index) => {
+    if (currentSong) {
+      const snapshot = createLogSnapshot('switch');
+      sendLog(snapshot);
+    }
     if (index >= 0 && index < playlist.length) {
       setCurrentIndex(index);
       setCurrentSong(playlist[index]);
-      setPlayed(0);
       setIsPlaying(true);
+      updateListenTimer('reset');
+      setIsSongLoading(true);
     }
-  };
+    const remainCount = playlist.length - index - 1;
+    if (remainCount <= sidebarLimit / 2 && sidebarHasMore) {
+      if (playlist[index]?._id) {
+        fetchRecommendNextSongs(playlist[index]._id, false);
+      }
+    }
+  }, [currentSong, playlist, createLogSnapshot, updateListenTimer]);
 
-  const togglePlay = () => {
-    setIsPlaying(!isPlaying);
-  };
+  const togglePlay = useCallback(() => {
+    if (isPlaying) {
+      updateListenTimer('pause');
+    } else {
+      updateListenTimer('play');
+    }
+    setIsPlaying(prev => !prev);
+  }, [isPlaying, updateListenTimer]);
 
-  const playNext = () => {
+  const playNext = useCallback(async (trigger = 'manual') => {
+    if (currentSong) {
+      const snapshot = createLogSnapshot(trigger === 'auto' ? 'auto_ended' : 'skip');
+      sendLog(snapshot);
+    }
+
     const nextIndex = (currentIndex + 1) % playlist.length;
     setCurrentIndex(nextIndex);
-    setPlayed(0);
     setCurrentSong(playlist[nextIndex]);
     setIsPlaying(true);
-  };
+    updateListenTimer('reset');
+    setIsSongLoading(true);
 
-  const playPrevious = () => {
-    if (currentIndex === 0) {
-      return;
+    // Fetch more if near end
+    const remainCount = playlist.length - nextIndex - 1;
+    if (remainCount <= sidebarLimit / 2 && sidebarHasMore) {
+      if (playlist[nextIndex]?._id) {
+        fetchRecommendNextSongs(playlist[nextIndex]._id, false);
+      }
     }
-    const prevIndex = currentIndex === 0 ? playlist.length - 1 : currentIndex - 1;
+  }, [currentIndex, playlist, currentSong, sidebarHasMore, createLogSnapshot, fetchRecommendNextSongs, updateListenTimer]);
+
+  const playPrevious = useCallback(async () => {
+    if (currentSong) {
+      const snapshot = createLogSnapshot('skip');
+      sendLog(snapshot);
+    }
+    if (currentIndex === 0) return;
+
+    const prevIndex = currentIndex - 1;
     setCurrentIndex(prevIndex);
     setCurrentSong(playlist[prevIndex]);
     setIsPlaying(true);
-  };
+    updateListenTimer('reset');
+    setIsSongLoading(true);
+  }, [currentIndex, playlist, currentSong, createLogSnapshot, updateListenTimer]);
 
-  const handleProgress = (state) => {
-    setPlayed(state.played);
-  };
+  const handlePlayerStart = useCallback(() => {
+    console.log("Audio bắt đầu phát - Bắt đầu tính giờ");
+    setIsSongLoading(false);
+    updateListenTimer('play');
+  }, [updateListenTimer]);
 
-  const handleDuration = (dur) => {
-    setDuration(dur);
-  };
+  const handlePlayerBuffer = useCallback(() => {
+    console.log("Buffering... Tạm dừng tính giờ");
+    updateListenTimer('pause');
+    setIsSongLoading(true);
+  }, [updateListenTimer]);
 
-  const handleSeek = (value) => {
-    const seekTo = parseFloat(value);
-    setPlayed(seekTo);
-    playerRef.current?.seekTo(seekTo);
-  };
+  const handlePlayerBufferEnd = useCallback(() => {
+    console.log("Buffer xong - Tiếp tục tính giờ");
+    updateListenTimer('play');
+    setIsSongLoading(false);
+  }, [updateListenTimer]);
 
-  const handleVolumeChange = (value) => {
-    setVolume(parseFloat(value));
-  };
-
-  const handleEnded = () => {
+  const handlePlayerEnded = useCallback(() => {
     if (autoPlayNext) {
-      playNext();
+      playNext('auto');
     } else {
       setIsPlaying(false);
+      updateListenTimer('pause');
     }
-  };
+  }, [autoPlayNext, playNext, updateListenTimer]);
 
-  const toggleAutoPlayNext = () => {
-    setAutoPlayNext(!autoPlayNext);
-  };
+  const handleVolumeChange = useCallback((val) => {
+    setVolume(val);
+  }, []);
 
-  const value = {
-    currentUser,
+  const toggleAutoPlayNext = useCallback(() => {
+    setAutoPlayNext(prev => !prev);
+  }, []);
+
+  const cleanupMusicSession = useCallback(async () => {
+    if (currentSong) {
+      const snapshot = createLogSnapshot('logout');
+      console.log("Đang gửi log cuối trước khi logout...", snapshot);
+      await sendLog(snapshot);
+    }
+    setIsPlaying(false);
+    setCurrentSong(null);
+    setCurrentIndex(0);
+    setVolume(0.5);
+    setPlaylist([]);
+    setViewList([]);
+    setAutoPlayNext(true);
+    updateListenTimer('reset');
+    // Reset các Ref
+    durationRef.current = 0;
+    progressRef.current = { playedSeconds: 0, played: 0 };
+    accumulatedTimeRef.current = 0;
+    lastStartTimeRef.current = 0;
+  }, [currentSong, createLogSnapshot, sendLog]); // Dependencies
+
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      if (currentSong && user) {
+
+        const payload = createLogSnapshot('unload');
+        if (!payload) return;
+
+        // sendBeacon cho phép trình duyệt gửi dữ liệu ngầm ngay cả khi trang đã đóng
+        const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+        const success = navigator.sendBeacon(API_URL_SEND_LOG, blob);
+
+        if (success) {
+          console.log("Đã gửi log thoát trang thành công");
+        }
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [currentSong, user, createLogSnapshot]);
+
+  // MEMO GIÁ TRỊ CUNG CẤP CHO CONTEXT
+  const value = useMemo(() => ({
+    // Trạng thái phát nhạc
     currentSong,
     isPlaying,
-    viewList,
+    isSongLoading, // [MỚI] Trạng thái đang tải nhạc
+    volume,
     playlist,
     currentIndex,
-    volume,
-    played,
-    duration,
     autoPlayNext,
+
+    // Giao diện feed và sidebar
+    viewList,
+    isLoading,
+    viewHasMore,
+    isSidebarLoading,
+    sidebarHasMore,
+
+    // Các hành động load data
+    fetchHomeFeed,
+    fetchRecommendNextSongs,
+
+    // Các chức năng điều khiển phát nhạc
+    playFromViewList,
+    playFromPlaylist,
+    togglePlay,
+    playNext,
+    playPrevious,
+    handleVolumeChange,
+    toggleAutoPlayNext,
+
+    // Các sự kiện của player 
+    handlePlayerStart,
+    handlePlayerBuffer,
+    handlePlayerBufferEnd,
+    handlePlayerEnded,
+
+    // Refs và handlers để đồng bộ với ReactPlayer
     playerRef,
+    handleUpdateProgress,
+    handleUpdateDuration,
+
+    // Sự kiện cleanup khi logout (gửi log cuối cùng)
+    cleanupMusicSession
+
+  }), [
+    currentSong,
+    isPlaying,
+    isSongLoading,
+    volume,
+    playlist,
+    currentIndex,
+    autoPlayNext,
+    viewList,
     isLoading,
     viewHasMore,
     isSidebarLoading,
     sidebarHasMore,
     fetchHomeFeed,
     fetchRecommendNextSongs,
-    login,
-    logout,
     playFromViewList,
     playFromPlaylist,
     togglePlay,
     playNext,
     playPrevious,
-    handleProgress,
-    handleDuration,
-    handleSeek,
     handleVolumeChange,
-    handleEnded,
     toggleAutoPlayNext,
-  };
+    handlePlayerEnded,
+    handlePlayerStart,
+    handlePlayerBuffer,
+    handlePlayerBufferEnd,
+    handleUpdateProgress,
+    handleUpdateDuration,
+    cleanupMusicSession
+  ]);
 
   return (
     <MusicContext.Provider value={value}>

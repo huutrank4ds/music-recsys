@@ -3,13 +3,20 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI #type: ignore
 from fastapi.middleware.cors import CORSMiddleware #type: ignore
+import config as cfg
 
-# Import các module nội bộ
 from app.core.database import DB
-from app.api.recs import router as recommendation_router
-from app.api.search import router as search_router
-from app.api.logging import router as logging_router
+from app.core.kafka_client import kafka_manager 
+from app.services.logging_service import logging_service
+from app.services.recommendation_service_be import recommendation_service
 from common.logger import get_logger
+
+from app.api.recommemdation_api import router as recommendation_router
+from app.api.search_api import router as search_router
+from app.api.logging_api import router as logging_router
+from app.api.user_api import router as user_router
+
+
 
 logger = get_logger("Backend Main")
 
@@ -17,59 +24,64 @@ logger = get_logger("Backend Main")
 MAX_RETRIES = 5       # Thử lại tối đa 5 lần
 RETRY_DELAY = 5       # Đợi 5 giây giữa mỗi lần thử
 
-FRONTEND_PORT = os.getenv("FRONTEND_PORT", "5173")
-
 allow_origins = [
-    f"http://localhost:{FRONTEND_PORT}",
-    f"http://127.0.0.1:{FRONTEND_PORT}",
-    "*", 
+    f"http://localhost:{cfg.FRONTEND_PORT}",
+    f"http://127.0.0.1:{cfg.FRONTEND_PORT}"
 ]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- STARTUP LOGIC ---
-    logger.info("[Backend] Đang khởi động hệ thống...")
+    logger.info("Đang khởi động hệ thống...")
     
-    # Cơ chế Retry kết nối Database
+    # Kết nối Database
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            logger.info(f"[Backend] Đang kết nối Database (Lần thử {attempt}/{MAX_RETRIES})...")
+            logger.info(f"Đang kết nối Database (Lần thử {attempt}/{MAX_RETRIES})...")
             
             # 1. Kết nối Mongo & Redis (Async)
             await DB.connect_to_mongo()
+            logger.info("MongoDB đã kết nối!")
             await DB.connect_to_redis()
-            
-            # 2. Kết nối Milvus (Sync hoặc Async tùy driver, nhưng cứ để trong try/catch)
-            DB.connect_to_milvus() 
-
-            logger.info("[Backend] Database đã kết nối và sẵn sàng!")
-            break  # Nếu thành công thì thoát vòng lặp ngay
+            logger.info("Redis đã kết nối!")
+            # 2. Kết nối Milvus
+            await recommendation_service.start()
+            logger.info("Milvus đã kết nối!") 
+            break 
             
         except Exception as e:
-            logger.warning(f"[Backend] Kết nối thất bại: {str(e)}")
+            logger.warning(f"Kết nối DB thất bại: {str(e)}")
             
-            # Nếu đã là lần thử cuối cùng mà vẫn lỗi -> Raise lỗi để sập App (vì không có DB không chạy được)
             if attempt == MAX_RETRIES:
-                logger.error(f"[Backend] Không thể kết nối Database sau {MAX_RETRIES} lần thử.")
+                logger.error(f"CRITICAL: Không thể kết nối Database sau {MAX_RETRIES} lần thử.")
                 raise e
             
-            # Nếu chưa hết lượt -> Đợi X giây rồi thử lại
-            logger.info(f"[Backend] Chờ {RETRY_DELAY}s trước khi thử lại...")
+            logger.info(f"Chờ {RETRY_DELAY}s trước khi thử lại...")
             await asyncio.sleep(RETRY_DELAY)
 
-    yield # --- APP RUNNING --- (Tại đây App bắt đầu nhận request)
+    # Kết nối Kafka
+    try:
+        logger.info("Đang khởi tạo Kafka Service...")
+        logging_service.initialize() # Tạo topic nếu chưa có
+        logger.info("Kafka Service đã sẵn sàng.")
+    except Exception as e:
+        logger.warning(f"Kafka chưa sẵn sàng (Lỗi: {e}). Hệ thống sẽ tự động kết nối lại sau.")
+    yield # --- APP RUNNING --- (App bắt đầu nhận request tại đây)
 
-    # --- SHUTDOWN LOGIC ---
-    logger.info("[Backend] Đang tắt hệ thống...")
+    
+    logger.info("Đang tắt hệ thống...")
+    try:
+        kafka_manager.stop()
+        logger.info("Đã đóng Kafka Producer.")
+    except Exception as e:
+        logger.error(f"Lỗi khi đóng Kafka: {e}")
+
+    # Đóng kết nối Database
     try:
         if hasattr(DB, "close"):
-            # Lưu ý: DB.close() có thể là async hoặc sync tùy code của bạn. 
-            # Nếu là async thì dùng await, nếu sync thì bỏ await.
-            # Ở đây mình giả định là async cho an toàn.
             await DB.close() 
-            logger.info("[Backend] Đóng kết nối DB thành công.")
+            logger.info("Đã đóng kết nối Database.")
     except Exception as e:
-        logger.error(f"[Backend] Lỗi khi đóng kết nối: {e}")
+        logger.error(f"Lỗi khi đóng Database: {e}")
 
 # Khởi tạo App
 app = FastAPI(
@@ -91,6 +103,7 @@ app.add_middleware(
 app.include_router(recommendation_router, prefix="/api/v1/recs", tags=["Recommendation"])
 app.include_router(search_router, prefix="/api/v1/search", tags=["Search"])
 app.include_router(logging_router, prefix="/api/v1/logs", tags=["User Logging"])
+app.include_router(user_router, prefix="/api/v1", tags=["User Management"])
 
 @app.get("/", tags=["Health"])
 async def health_check():

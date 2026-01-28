@@ -99,11 +99,17 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | Field | Type | Description |
 | :--- | :--- | :--- |
 | `_id` | String | **PK**. Track ID (UUID) |
-| `title` | String | Tên bài hát |
-| `artist` | String | Tên nghệ sĩ |
+| `track_name` | String | Tên bài hát |
+| `artist_name` | String | Tên nghệ sĩ |
 | `artist_id` | String | Mã định danh nghệ sĩ |
 | `image_url` | String | Đường dẫn ảnh đại diện bài hát |
 | `url` | String | Đường dẫn đến dữ liệu bài hát |
+| `plays_7d` | Int | Lượt nghe bài hát trong 7 ngày gần nhất |
+| `plays_cumulative` | Long | Lượt nghe bài hát tích lũy |
+| `duration` | Int | Thời lượng bài hát (s) |
+| `release_date` | Date | YYYY-MM-DDT00:00:00+00:00 |
+| `lrclib_plain_lyrics` | String | Lời bài hát |
+| `lrclib_synced_lyrics` | String | Lời bài hát có thông tin thời gian |
 
 #### Collection: `users`
 
@@ -114,7 +120,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `_id` | String | **PK**. User ID |
 | `username` | String | Tên hiển thị |
 | `latent_vector` | Array `<Float>` | Vector đặc trưng `[0.1, -0.5, ...]` |
-| `last_updated` | Date | Thời gian chạy model gần nhất |
+| `image_url` | String | Đường dẫn ảnh đại diện user |
+| `signup_date` | Date | YYYY-MM-DDT00:00:00+00:00  |
 
 ---
 
@@ -122,7 +129,7 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 #### Collection 1: `music_collection` (Collaborative Filtering)
 > Lưu trữ vector đặc trưng của bài hát từ User Behavior (ALS).
 * **Metric Type:** `IP` (Inner Product).
-* **Dim:** 32 (latent factors).
+* **Dim:** 64 (latent factors).
 
 #### Collection 2: `lyrics_embeddings` (Content-Based Filtering)
 > Lưu trữ vector đặc trưng của lời bài hát (Lyrics).
@@ -143,8 +150,9 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 
 ### 🔹 Phase 3: Content-Based Enrichment
 1. **Fetch:** Lấy lời bài hát (Lyrics) từ **LRCLIB API**.
-2. **Embed:** Dùng **Sentence Transformer** (`all-MiniLM-L6-v2`) tạo vector.
-3. **Sync:** Lưu vector vào Milvus `lyrics_embeddings`.
+2. **Clean:** Xóa các bài hát không tìm thấy Lyrics để đảm bảo chất lượng dữ liệu.
+3. **Embed:** Dùng **Sentence Transformer** (`all-MiniLM-L6-v2`) tạo vector.
+4. **Sync:** Lưu vector vào Milvus `lyrics_embeddings`.
 
 ### 🔹 Phase 4: Serving (Hybrid Recommendation)
 
@@ -159,6 +167,46 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 1. **ALS Candidate:** Tìm bài user khác cũng nghe (Milvus `music_collection`).
 2. **Content Candidate:** Tìm bài có lời tương tự (Milvus `lyrics_embeddings`).
 3. **Merge:** Trộn kết quả tỉ lệ 60/40 -> Trả về danh sách.
+
+## 🧠 Recommendation Engine Strategy
+
+Hệ thống sử dụng chiến lược lai (Hybrid), kết hợp sức mạnh của **Collaborative Filtering** (hành vi đám đông) và **Content-Based Filtering** (nội dung âm nhạc), đồng thời phân tách rõ ràng giữa sở thích dài hạn (Long-term) và ngắn hạn (Short-term).
+
+### 1. Implicit Feedback Formula (Tính điểm hành vi)
+Để lượng hóa mức độ yêu thích của người dùng $u$ đối với bài hát $i$, chúng ta không chỉ đếm số lượt nghe mà sử dụng công thức tính điểm hành vi như sau:
+
+$$R_{ui} = w_1 \cdot \mathbb{I}(\text{is\_complete}) - w_2 \cdot \mathbb{I}(\text{is\_skip}) + w_3 \cdot \log(1 + \text{duration})$$
+
+*Trong đó:*
+*   $\mathbb{I}(\cdot)$: Hàm chỉ thị (1 nếu đúng, 0 nếu sai).
+*   $w_1, w_3$: Trọng số tích cực (thưởng cho việc nghe hết bài và nghe lâu).
+*   $w_2$: Trọng số tiêu cực (phạt nặng hành vi bỏ qua bài hát).
+
+### 2. Hybrid Scoring Formula (Tính điểm gợi ý)
+Hệ thống sử dụng mô hình 3 tầng để cá nhân hóa chính xác nhất:
+
+$$Score(j) = \alpha \cdot \underbrace{\text{Sim}_{Behavior}(\text{Session}, j)}_{\text{User Behavior}} + (1 - \alpha) \cdot \underbrace{\text{Sim}_{Content}(c, j)}_{\text{Instant Context}}$$
+
+*Trong đó:*
+*   **User Behavior (Nhánh hành vi):** Kết hợp giữa sở thích lâu dài và Session hiện tại.
+    *   Vector dùng để search: $\vec{V}_{target} = 0.3 \cdot \vec{V}_{Long\_term} + 0.7 \cdot \vec{V}_{Short\_term\_Session}$
+    *   $\vec{V}_{Short\_term\_Session}$: Vector cộng dồn các bài user vừa nghe trong phiên.
+*   **Instant Context (Nhánh nội dung):** Dựa trên nội dung bài hát đang phát.
+    *   $\text{Sim}_{Content}$: Độ tương đồng Lyrics giữa bài đang nghe ($c$) và bài ứng viên ($j$).
+*   $\alpha$: Hệ số cân bằng (0.6). Hệ thống ưu tiên hành vi người dùng, nhưng dùng nội dung để lấp đầy và khám phá.
+
+### 3. Phân loại chiến lược
+| Chiến lược | Kỹ thuật | Mục đích | Dữ liệu đầu vào |
+| :--- | :--- | :--- | :--- |
+| **Long-term** | Matrix Factorization (ALS) | Gợi ý dựa trên "gu" âm nhạc cố định. | Lịch sử nghe trong 90 ngày. |
+| **Short-term** | Sentence Transformers (BERT) | Gợi ý dựa trên tâm trạng/nội dung hiện tại. | Bài hát đang nghe (Lyrics). |
+
+### 4. Lyrics Embedding Strategy (Xử lý lời bài hát)
+Để máy tính có thể "hiểu" được nội dung bài hát, hệ thống áp dụng kỹ thuật **Semantic Search** thông qua các bước sau:
+
+1.  **Vectorization (Mã hóa):** Sử dụng Pre-trained Model `sentence-transformers/all-MiniLM-L6-v2` để chuyển đổi lời bài hát (Text) thành Vector 384 chiều. Model này tối ưu cho việc tìm kiếm sự tương đồng ngữ nghĩa.
+2.  **Indexing (Đánh chỉ mục):** Lưu trữ vectors vào Milvus với Index `IVF_FLAT` hoặc `HNSW` để tối ưu tốc độ tìm kiếm trong không gian lớn.
+3.  **Searching (Tìm kiếm):** Sử dụng phép đo `Cosine Similarity` để tìm các bài hát có "khoảng cách" gần nhất với bài đang nghe.
 
 ## ✅ Implementation Checklist (Tiến độ thực hiện)
 
