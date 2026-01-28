@@ -107,7 +107,7 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `plays_7d` | Int | Lượt nghe bài hát trong 7 ngày gần nhất |
 | `plays_cumulative` | Long | Lượt nghe bài hát tích lũy |
 | `duration` | Int | Thời lượng bài hát (s) |
-| `release_date` | String | YYYY-MM-DD |
+| `release_date` | Date | YYYY-MM-DDT00:00:00+00:00 |
 | `lrclib_plain_lyrics` | String | Lời bài hát |
 | `lrclib_synced_lyrics` | String | Lời bài hát có thông tin thời gian |
 
@@ -120,6 +120,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `_id` | String | **PK**. User ID |
 | `username` | String | Tên hiển thị |
 | `latent_vector` | Array `<Float>` | Vector đặc trưng `[0.1, -0.5, ...]` |
+| `image_url` | String | Đường dẫn ảnh đại diện user |
+| `signup_date` | Date | YYYY-MM-DDT00:00:00+00:00  |
 
 ---
 
