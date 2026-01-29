@@ -17,9 +17,7 @@ from pyspark.ml.recommendation import ALS
 from pymongo import MongoClient, UpdateOne #type: ignore
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility #type: ignore
 
-# ============================================================
 # CONFIGURATION
-# ============================================================
 DATA_PATH = "/opt/data/processed_sorted"
 MONGODB_URI = "mongodb://mongodb:27017"
 MONGO_DB = "music_recsys"
@@ -27,9 +25,9 @@ MILVUS_HOST = "milvus"
 MILVUS_PORT = 19530
 MILVUS_COLLECTION = "music_collection"
 
-# ALS Hyperparameters
-ALS_RANK = 64
-ALS_MAX_ITER = 15
+# ALS Hyperparameters (Optimized for Docker Memory)
+ALS_RANK = 32
+ALS_MAX_ITER = 10
 ALS_REG_PARAM = 0.1
 ALS_ALPHA = 40.0
 
@@ -55,6 +53,27 @@ def run_training():
         # 2. Load data
         log(f"Đọc dữ liệu từ: {DATA_PATH}")
         df = spark.read.parquet(DATA_PATH)
+        
+        # --- LỌC TRACKS: Chỉ train trên những bài hát HỢP LỆ (có trong MongoDB) ---
+        log("Đang lấy whitelist các bài hát từ MongoDB...")
+        client = MongoClient(MONGODB_URI)
+        db = client[MONGO_DB]
+        valid_track_ids = db["songs"].distinct("_id")
+        client.close()
+        
+        log(f"Tim thấy {len(valid_track_ids):,} bài hát hợp lệ trong MongoDB.")
+        
+        # Lọc DF (sử dụng broadcast join hoặc isin nếu list nhỏ, nhưng với 130k bài thì isin vẫn OK)
+        # Cách hiệu quả hơn với Spark: Tạo 1 DF nhỏ chỉ chứa ID và join
+        valid_tracks_df = spark.createDataFrame([(tid,) for tid in valid_track_ids], ["valid_id"])
+        
+        # Inner Join để lọc
+        df = df.join(valid_tracks_df, df.musicbrainz_track_id == valid_tracks_df.valid_id, "inner") \
+               .drop("valid_id")
+               
+        log(f"Sau khi lọc, dữ liệu clean để train:")
+        # --------------------------------------------------------------------------
+
         total_rows = df.count()
         log(f"Tổng số dòng: {total_rows:,}")
         
@@ -102,7 +121,7 @@ def run_training():
             nonnegative=True
         )
         model = als.fit(als_data)
-        log("✅ ALS Model trained!")
+        log(" ALS Model trained!")
         
         # 5. Sync User Factors -> MongoDB
         log("Syncing User Factors to MongoDB...")
@@ -131,7 +150,10 @@ def run_training():
             
             bulk_ops.append(UpdateOne(
                 {"_id": row["user_id"]},
-                {"$set": {"latent_vector": vector, "last_updated": datetime.now()}},
+                {
+                    "$set": {"latent_vector": vector},
+                    "$setOnInsert": {"username": f"User {row['user_id'][:8]}"}
+                },
                 upsert=True
             ))
         
@@ -202,14 +224,14 @@ def run_training():
         
         # Summary
         log("=" * 60)
-        log("✅ TRAINING COMPLETED!")
+        log(" TRAINING COMPLETED!")
         log(f"Users: {len(user_data)}")
         log(f"Items: {total_inserted}")
         log(f"Completed at: {datetime.now()}")
         log("=" * 60)
         
     except Exception as e:
-        log(f"❌ ERROR: {e}")
+        log(f" ERROR: {e}")
         import traceback
         traceback.print_exc()
         raise e

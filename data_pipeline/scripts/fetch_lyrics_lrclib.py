@@ -44,14 +44,11 @@ async def search_lyrics_async(session: aiohttp.ClientSession, track_name: str, a
                     
                     if results and len(results) > 0:
                         best_match = results[0]
-                        return {
                             "lrclib_id": best_match.get("id"),
                             "lrclib_plain_lyrics": best_match.get("plainLyrics"),
                             "lrclib_synced_lyrics": best_match.get("syncedLyrics"),
-                            "lrclib_track_name": best_match.get("trackName"),
-                            "lrclib_artist_name": best_match.get("artistName"),
-                            "lrclib_album_name": best_match.get("albumName"),
-                            "lrclib_duration": best_match.get("duration")
+                            "duration": str(best_match.get("duration") or 300),
+                            "release_date": best_match.get("releaseDate") or None
                         }
                 return None
                 
@@ -66,8 +63,8 @@ async def process_song(session: aiohttp.ClientSession, song: dict, semaphore: as
     Process một bài hát: fetch lyrics và trả về update operation.
     """
     track_id = song["_id"]
-    track_name = song.get("title", "")
-    artist_name = song.get("artist", "")
+    track_name = song.get("track_name") or song.get("title", "")
+    artist_name = song.get("artist_name") or song.get("artist", "")
     
     lyrics_data = await search_lyrics_async(session, track_name, artist_name, semaphore)
     
@@ -97,9 +94,14 @@ async def fetch_lyrics_async():
     db = client[MONGO_DB]
     collection = db[MONGO_COLLECTION]
     
-    # Query songs without lyrics
-    query = {"lrclib_fetched": {"$ne": True}}
-    projection = {"_id": 1, "title": 1, "artist": 1, "listen_count": 1}
+    # Query songs without lyrics OR missing new fields (release_date)
+    query = {
+        "$or": [
+            {"lrclib_fetched": {"$ne": True}},
+            {"release_date": {"$exists": False}, "lrclib_fetched": True}
+        ]
+    }
+    projection = {"_id": 1, "title": 1, "artist": 1, "track_name": 1, "artist_name": 1, "listen_count": 1}
     
     cursor = collection.find(query, projection).sort("listen_count", -1)
     
