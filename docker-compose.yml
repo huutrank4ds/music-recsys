@@ -92,7 +92,6 @@ services:
       - ./data:/opt/data
       - ./data_pipeline:/opt/src
       - ./common:/opt/src/common
-      - ./src/enrichment:/opt/src/enrichment
       - ./huggingface_cache:/tmp/huggingface_cache
     depends_on:
       kafka:
