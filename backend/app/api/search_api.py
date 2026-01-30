@@ -1,3 +1,4 @@
+# app/api/search_api.py
 from typing import Any
 from fastapi import APIRouter, HTTPException #type: ignore
 from app.services.search_service_be import search_service

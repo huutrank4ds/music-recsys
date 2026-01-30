@@ -7,7 +7,7 @@ import config as cfg
 
 from app.core.database import DB
 from app.core.kafka_client import kafka_manager 
-from app.services.logging_service import logging_service
+from app.services.logging_service_be import logging_service
 from app.services.recommendation_service_be import recommendation_service
 from common.logger import get_logger
 

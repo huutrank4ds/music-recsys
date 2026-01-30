@@ -4,7 +4,7 @@ from common.schemas.log_schemas import UserLogRequest
 from common.logger import get_logger
 
 # Import đúng Service Class và Instance từ file service đã refactor
-from app.services.logging_service import logging_service, LoggingService
+from app.services.logging_service_be import logging_service, LoggingService
 
 router = APIRouter()
 logger = get_logger("Logging API")

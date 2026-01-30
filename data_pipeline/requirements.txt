@@ -13,6 +13,5 @@ python-dotenv
 # --- Machine Learning & Recommender System ---
 numpy
 pymilvus>=2.3.0
-
-# yt api
 ytmusicapi
+sentence-transformers

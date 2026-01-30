@@ -1,29 +1,33 @@
 import os
 
-KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
-KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "music_log")
-KAFKA_NUM_PARTITIONS = int(os.getenv("KAFKA_NUM_PARTITIONS", "3"))
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC")
+KAFKA_NUM_PARTITIONS = int(os.getenv("KAFKA_NUM_PARTITIONS", "4"))
 KAFKA_REPLICATION_FACTOR = int(os.getenv("KAFKA_REPLICATION_FACTOR", "1"))
 
-MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
-MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-DATALAKE_BUCKET = os.getenv("DATALAKE_BUCKET", "music-logs-bucket")
+MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT")
+MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
+MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
+MINIO_DATALAKE_BUCKET = os.getenv("MINIO_DATALAKE_BUCKET")
 
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongodb:27017")
-MONGO_DB = os.getenv("MONGO_DB", "music_recsys")
-COLLECTION_SONGS = os.getenv("COLLECTION_SONGS", "songs")
-COLLECTION_USERS = os.getenv("COLLECTION_USERS", "users")
+MONGO_URI = os.getenv("MONGO_URI")
+MONGO_DB = os.getenv("MONGO_DB")
+MONGO_SONGS_COLLECTION = os.getenv("MONGO_SONGS_COLLECTION")
+MONGO_USERS_COLLECTION = os.getenv("MONGO_USERS_COLLECTION")
 
-ALS_MILVUS_COLLECTION = os.getenv("ALS_MILVUS_COLLECTION", "music_collection")
-CONTENT_MILVUS_COLLECTION = os.getenv("CONTENT_MILVUS_COLLECTION", "lyrics_embeddings")
+MILVUS_URI = os.getenv("MILVUS_URI")
+MILVUS_ALS_COLLECTION = os.getenv("MILVUS_ALS_COLLECTION")
+MILVUS_CONTENT_COLLECTION = os.getenv("MILVUS_CONTENT_COLLECTION")
 
-ALS_RANK = int(os.getenv("ALS_RANK", 64))
-ALS_MAX_ITER = int(os.getenv("ALS_MAX_ITER", 15))
-ALS_REG_PARAM = float(os.getenv("ALS_REG_PARAM", 0.1))
-ALS_ALPHA = float(os.getenv("ALS_ALPHA", 40.0))
-SLIDING_WINDOW_DAYS = int(os.getenv("SLIDING_WINDOW_DAYS", 30))
-MUSIC_LOGS_DATA_PATH = "/data/music-logs/"
+REDIS_URL = os.getenv("REDIS_URL")
+
+ALS_RANK = int(os.getenv("ALS_RANK", "64"))
+ALS_MAX_ITER = int(os.getenv("ALS_MAX_ITER", "15"))
+ALS_REG_PARAM = float(os.getenv("ALS_REG_PARAM", "0.1"))
+ALS_ALPHA = float(os.getenv("ALS_ALPHA", "40.0"))
+ALS_SLIDING_WINDOW_DAYS = int(os.getenv("ALS_SLIDING_WINDOW_DAYS", "90"))
+
+MUSIC_LOGS_DATA_PATH = "/app/data/simulation_logs/"
 
 FRONTEND_PORT = int(os.getenv("FRONTEND_PORT", "5173"))
 
