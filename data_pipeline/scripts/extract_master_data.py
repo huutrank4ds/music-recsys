@@ -26,8 +26,8 @@ OUTPUT_USER_DIR = Path(os.getenv("USER_MASTER_DATA_PATH", "/opt/data/user_master
 OUTPUT_USER_FILE = OUTPUT_USER_DIR / "users.jsonl"
 
 # MongoDB Config
-MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/")
-DB_NAME = os.getenv("MONGO_DB", "music_recsys")
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = os.getenv("MONGO_DB")
 COLLECTION_SONGS = "songs"
 
 BATCH_SIZE = 100000
@@ -75,7 +75,7 @@ def generate_avatar(name):
 def generate_username(user_id):
     """Tạo username giả lập"""
     short_hash = hashlib.sha1(str(user_id).encode()).hexdigest()[:8]
-    return f"User_{short_hash}"
+    return f"{short_hash}"
 
 # ================= MAIN =================
 
@@ -120,6 +120,7 @@ def main():
     
     parquet_writer = None
     last_row_debug = None 
+    last_user_debug = None # <--- [ADD 1] Biến lưu mẫu User
 
     try:
         with OUTPUT_USER_FILE.open('w', encoding='utf-8') as f_user_out:
@@ -150,17 +151,17 @@ def main():
                             continue
 
                         # --- BƯỚC 2: XỬ LÝ TIMESTAMP (QUAN TRỌNG) ---
-                        # Chuyển chuỗi "2009-05-04T13:06:09" -> Datetime -> Unix Timestamp (Seconds - Int64)
+                        # Chuyển chuỗi "2009-05-04T13:06:09" -> Datetime -> Unix Timestamp (Milliseconds - Int64)
                         try:
-                            df_clean['timestamp'] = pd.to_datetime(df_clean['timestamp'], errors='coerce')
-                            # Chuyển về số giây (int64)
-                            df_clean['timestamp'] = df_clean['timestamp'].astype('int64') // 10**9
+                            df_clean['timestamp'] = pd.to_datetime(df_clean['timestamp'], errors='coerce').astype("datetime64[ns]")
+                            # Chuyển về số mili giây (int64)
+                            df_clean['timestamp'] = df_clean['timestamp'].astype('int64') // 10**6
                         except Exception as e:
                             logger.error(f"Lỗi convert timestamp: {e}")
                             continue
 
                         # --- BƯỚC 3: TẠO CÁC CỘT CÒN LẠI ---
-                        df_clean['action'] = "completed"
+                        df_clean['action'] = "complete"
                         df_clean['source'] = "simulation"
                         df_clean['duration'] = df_clean['mapped_duration'].astype('float')
                         df_clean['total_duration'] = df_clean['mapped_duration'].astype('float')
@@ -186,7 +187,7 @@ def main():
                         # --- BƯỚC 4: TRÍCH XUẤT USER MASTER ---
                         unique_users = df_clean['user_id'].unique()
                         new_users = []
-                        signup_date_str = datetime.now().strftime("%Y-%m-%d")
+                        signup_date_str = datetime.now().isoformat()
 
                         for uid in unique_users:
                             # Chuyển uid về string để chắc chắn
@@ -208,6 +209,10 @@ def main():
                         if new_users:
                             for u in new_users:
                                 f_user_out.write(json.dumps(u, ensure_ascii=False) + "\n")
+                            
+                            # <--- [ADD 2] Lưu mẫu User cuối cùng của batch này để in
+                            last_user_debug = new_users[-1]
+                            
                             total_users_saved += len(new_users)
 
                         total_processed += len(df)
@@ -228,10 +233,18 @@ def main():
     logger.info(f"Output Logs: {OUTPUT_LOGS_FILE}")
     logger.info(f"Output Users: {OUTPUT_USER_FILE}")
 
+    # <--- [ADD 3] In mẫu dữ liệu Log
     if last_row_debug:
         print("\n" + "="*50)
         print("SAMPLE DATA (Dữ liệu log cuối cùng):")
         print(json.dumps(last_row_debug, indent=4))
+        print("="*50)
+
+    # <--- [ADD 4] In mẫu dữ liệu User
+    if last_user_debug:
+        print("\n" + "="*50)
+        print("SAMPLE USER DATA (Dữ liệu user cuối cùng):")
+        print(json.dumps(last_user_debug, indent=4, ensure_ascii=False))
         print("="*50 + "\n")
 
 if __name__ == "__main__":

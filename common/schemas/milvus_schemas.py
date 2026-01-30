@@ -13,24 +13,24 @@ class MilvusSchemas:
     """
 
     @staticmethod
-    def song_embedding_schema() -> CollectionSchema:
+    def song_embedding_schema(dim=ALS_RANK) -> CollectionSchema:
         """
         Schema lưu vector ALS (Collaborative Filtering).
         """
         fields = [
             FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False, description="ID bài hát"),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=ALS_RANK, description="Vector ALS")
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim, description="Vector ALS")
         ]
         return CollectionSchema(fields, description="ALS Song Embeddings")
 
     @staticmethod
-    def content_embedding_schema() -> CollectionSchema:
+    def content_embedding_schema(dim=CONTENT_RANK) -> CollectionSchema:
         """
         Schema lưu vector nội dung (Content-based: Lyrics, Audio...).
         """
         fields = [
             FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=64, is_primary=True, auto_id=False, description="ID bài hát"),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=CONTENT_RANK, description="Vector nội dung (Lyrics/Audio)")
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim, description="Vector nội dung (Lyrics/Audio)")
         ]
         return CollectionSchema(fields, description="Content/Lyrics Embeddings")
 

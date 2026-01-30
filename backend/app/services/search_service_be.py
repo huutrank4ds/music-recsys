@@ -1,10 +1,12 @@
+# app/services/search_service_be.py
 from app.core.database import DB
 from typing import List, Optional, Any
 from pymongo.errors import OperationFailure #type: ignore
+
 from common.logger import get_logger
-import os
-import config as cfg
 from common.constants import SONG_SUMMARY_PROJECTION
+import config as cfg
+
 
 logger = get_logger("Search Service")
 
@@ -15,18 +17,18 @@ class SearchService:
         Tạo Text Index cho collection songs 
         """
         try:
-            await DB.db[cfg.COLLECTION_SONGS].create_index(
+            await DB.db[cfg.COLLECTION_SONGS].create_index( #type: ignore
                 [("track_name", "text"), ("artist_name", "text")],
                 name="song_search_index_v2",
                 weights={"track_name": 10, "artist_name": 5}
             )
             logger.info("Tạo Text Index cho collection songs thành công.")
-            await DB.db[cfg.COLLECTION_SONGS].create_index(
+            await DB.db[cfg.COLLECTION_SONGS].create_index( #type: ignore
                 [("plays_7d", -1)],
                 name="idx_plays_7d_desc"
             )
             logger.info("Tạo Index cho plays_7d giảm dần thành công.")
-            await DB.db[cfg.COLLECTION_SONGS].create_index(
+            await DB.db[cfg.COLLECTION_SONGS].create_index( #type: ignore
                 [("plays_cumulative", -1)],
                 name="idx_plays_cumulative_desc"
             )
@@ -48,12 +50,13 @@ class SearchService:
             pipeline = [
                 {"$match": {"$text": {"$search": query}}}, # Sử dụng $text để tìm kiếm
                 {"$addFields": {"score": {"$meta": "textScore"}}}, # Thêm trường score
+                {"$project": project_stage}, # Chỉ lấy các trường cần thiết
                 {"$sort": {"score": -1}}, # Sắp xếp theo score giảm dần
                 {"$skip": skip}, # Bỏ qua số lượng document
                 {"$limit": limit + 1} # Lấy limit + 1 để kiểm tra has_more
             ]
 
-            cursor = DB.db[cfg.COLLECTION_SONGS].aggregate(pipeline)
+            cursor = DB.db[cfg.COLLECTION_SONGS].aggregate(pipeline) #type: ignore
             songs = await cursor.to_list(length=limit + 1)
             
             if len(songs) > limit:
@@ -85,7 +88,7 @@ class SearchService:
         }
         
         try:
-            cursor = DB.db[cfg.COLLECTION_SONGS].find(filter_query, SONG_SUMMARY_PROJECTION) # Lấy projection tóm tắt
+            cursor = DB.db[cfg.COLLECTION_SONGS].find(filter_query, SONG_SUMMARY_PROJECTION) #type: ignore
             songs = await cursor.skip(skip).limit(limit + 1).to_list(length=limit + 1)
             
             if len(songs) > limit:

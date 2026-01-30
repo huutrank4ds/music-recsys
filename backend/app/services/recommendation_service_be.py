@@ -1,23 +1,22 @@
-import json
+# app/services/recommendation_service_be.py
 import random
 import asyncio
 import numpy as np
 from typing import List, Any, Optional, Tuple
+import heapq
+from pymilvus import Collection, utility #type: ignore
 
 from app.core.database import DB
 from common.logger import get_logger
 from common.schemas.milvus_schemas import get_milvus_song_embedding_schema, index_params_milvus, search_params_milvus, get_milvus_content_embedding_schema
-from pymilvus import Collection, utility #type: ignore
-import config as cfg
-from app.core.database import DB
-import heapq
 from common.constants import SONG_SUMMARY_PROJECTION
+import config as cfg
 
 NAME_TASK = "Recommendation Service"
 logger = get_logger(NAME_TASK)
 
 class RecommendationService:
-    def __init__(self, als_collection_name: str = cfg.ALS_MILVUS_COLLECTION, content_collection_name: str = cfg.CONTENT_MILVUS_COLLECTION):
+    def __init__(self, als_collection_name: Optional[str] = cfg.MILVUS_ALS_COLLECTION, content_collection_name: Optional[str] = cfg.MILVUS_CONTENT_COLLECTION):
         self.als_collection_name = als_collection_name
         self.content_collection_name = content_collection_name
         self._als_collection = None
@@ -68,7 +67,7 @@ class RecommendationService:
             schema_func=get_milvus_content_embedding_schema
         )
 
-    def _setup_one_collection(self, name: str, schema_func) -> Collection:
+    def _setup_one_collection(self, name: Optional[str], schema_func) -> Collection:
         """Helper function: Tạo/Load 1 collection cụ thể"""
         if not utility.has_collection(name):
             logger.info(f"Đang tạo mới Collection: {name}")
@@ -93,8 +92,8 @@ class RecommendationService:
         if v_long_bytes:
             v_long = np.frombuffer(v_long_bytes, dtype=np.float32)
         else:
-            user_data = await DB.db["users"].find_one({"_id": user_id})
-            if not user_data or "latent_vector" not in user_data:
+            user_data = await DB.db[cfg.MONGO_USERS_COLLECTION].find_one({"_id": user_id})
+            if not user_data or "latent_vector" not in user_data or user_data["latent_vector"] is None:
                 return None
             v_long = np.array(user_data["latent_vector"], dtype=np.float32)
             await DB.redis.setex(long_key, int(cfg.KEY_VECTOR_TTL), v_long.tobytes())
@@ -109,7 +108,7 @@ class RecommendationService:
         else:
             return default
         
-    async def _get_session_vector(self, user_id: str, weightht_long: float = 0.7) -> Tuple:
+    async def _get_session_vector(self, user_id: str, weight_long: float = 0.7) -> Tuple:
         
         # Khởi tạo giá trị mặc định
         v_long = None
@@ -128,8 +127,8 @@ class RecommendationService:
             # Logic Trọng số (Vector Weighting Strategy)
             if v_long is not None and v_short is not None:
                 if v_long.shape == v_short.shape:
-                    vector_to_search = weightht_long * v_long + (1 - weightht_long) * v_short
-                    logger.info(f"User {user_id}: Gợi ý kết hợp Long ({weightht_long}) kết hợp Short.")
+                    vector_to_search = weight_long * v_long + (1 - weight_long) * v_short
+                    logger.info(f"User {user_id}: Gợi ý kết hợp Long ({weight_long}) kết hợp Short.")
                 else:
                     # Nếu lệch shape (hiếm gặp), ưu tiên Long
                     vector_to_search = v_long
@@ -235,7 +234,7 @@ class RecommendationService:
             pool_limit = min(limit + len(exclude_set) + 50, 500)
 
         # Lấy thêm trường "plays_7d" để tính toán trọng số
-        cursor = DB.db["songs"].find(query, {"_id": 1, "plays_7d": 1}).sort("plays_7d", -1).limit(pool_limit)
+        cursor = DB.db[cfg.MONGO_SONGS_COLLECTION].find(query, {"_id": 1, "plays_7d": 1}).sort("plays_7d", -1).limit(pool_limit)
         docs = await cursor.to_list(length=pool_limit)
         
         # Lọc trừ các ID không mong muốn
@@ -400,7 +399,7 @@ class RecommendationService:
             popcount = len(song_ids_bytes)
             song_ids = [x.decode('utf-8') for x in song_ids_bytes]
 
-            cursor = DB.db["songs"].find({"_id": {"$in": song_ids}}, SONG_SUMMARY_PROJECTION)
+            cursor = DB.db[cfg.MONGO_SONGS_COLLECTION].find({"_id": {"$in": song_ids}}, SONG_SUMMARY_PROJECTION)
             songs_unordered = await cursor.to_list(length=len(song_ids))
             song_map = {doc["_id"]: doc for doc in songs_unordered}
             
@@ -551,7 +550,7 @@ class RecommendationService:
             popped_count = len(song_ids_bytes)
             song_ids = [x.decode('utf-8') for x in song_ids_bytes]
             
-            cursor = DB.db["songs"].find({"_id": {"$in": song_ids}}, SONG_SUMMARY_PROJECTION)
+            cursor = DB.db[cfg.MONGO_SONGS_COLLECTION].find({"_id": {"$in": song_ids}}, SONG_SUMMARY_PROJECTION)
             docs = await cursor.to_list(length=popped_count)
             docs_map = {d["_id"]: d for d in docs}
             

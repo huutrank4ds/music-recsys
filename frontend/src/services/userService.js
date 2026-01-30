@@ -16,7 +16,6 @@ export const fetchUsers = async (num_users = 5) => {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const responseJson = await response.json();
-        console.log("Kết quả lấy người dùng từ service:", responseJson);
         return responseJson.users || [];
     } catch (error) {
         console.error("Lỗi service lấy người dùng:", error);

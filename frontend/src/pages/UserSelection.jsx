@@ -4,63 +4,35 @@ import { fetchUsers, createUser } from '../services/userService';
 import { User, Loader2, AlertCircle, Plus, X } from 'lucide-react';
 
 const UserSelection = () => {
-  const { login } = useAuth();
-  
-  // --- STATE DỮ LIỆU ---
-  const [users, setUsers] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { login, createNewProfile, availableUsers, userError } = useAuth();
 
   // --- STATE MODAL TẠO USER ---
   const [showModal, setShowModal] = useState(false);
   const [newUserName, setNewUserName] = useState('');
   const [isCreating, setIsCreating] = useState(false); // Loading khi đang tạo
 
-  // 1. Tải danh sách user khi trang vừa mở
-  useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        const data = await fetchUsers();
-        // Xử lý trường hợp backend trả về { data: [...] } hoặc mảng trực tiếp [...]
-        const userList = Array.isArray(data) ? data : (data.data || []);
-        setUsers(userList);
-      } catch (err) {
-        setError("Không thể kết nối đến máy chủ.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    loadUsers();
-  }, []);
 
-  // 2. Xử lý khi chọn User để đăng nhập
+  // Xử lý khi chọn User để đăng nhập
   const handleSelectUser = (user) => {
     login(user); // AuthContext sẽ lưu user và chuyển hướng sang Dashboard
   };
 
-  // 3. Xử lý khi bấm nút "Create" trong Modal
   const handleCreateUser = async (e) => {
-    e.preventDefault(); // Ngăn reload trang
+    e.preventDefault();
     if (!newUserName.trim()) return;
-
     setIsCreating(true);
     try {
-      // Gọi API tạo user
-      const newUser = await createUser(newUserName);
-      
-      // Thành công: Thêm user mới vào danh sách hiển thị ngay lập tức
-      // (Không cần gọi lại API fetchAllUsers -> Tối ưu hiệu năng)
-      setUsers(prev => [...prev, newUser]);
-      
-      // Reset form và đóng modal
+      const createdUser = await createNewProfile(newUserName.trim());
       setNewUserName('');
       setShowModal(false);
     } catch (err) {
-      alert("Lỗi khi tạo profile: " + err.message);
+      console.error("Lỗi tạo user mới:", err);
+      alert("Không thể tạo user mới. Vui lòng thử lại.");
     } finally {
       setIsCreating(false);
     }
   };
+  
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4 relative">
@@ -74,27 +46,27 @@ const UserSelection = () => {
         </div>
 
         {/* --- TRẠNG THÁI LOADING & ERROR --- */}
-        {isLoading && (
+        {/* {isLoading && (
           <div className="flex flex-col items-center justify-center h-64">
             <Loader2 className="w-12 h-12 text-primary-500 animate-spin mb-4" />
             <p className="text-gray-500">Đang tải danh sách...</p>
           </div>
-        )}
+        )} */}
 
-        {error && !isLoading && (
+        {userError && (
           <div className="flex flex-col items-center text-red-400 mb-8">
             <AlertCircle className="w-12 h-12 mb-2" />
-            <p>{error}</p>
+            <p>{userError}</p>
             <button onClick={() => window.location.reload()} className="mt-4 underline">Thử lại</button>
           </div>
         )}
 
         {/* --- DANH SÁCH USER --- */}
-        {!isLoading && !error && (
+        {!userError && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8 justify-items-center animate-fade-in">
             
             {/* Render từng User */}
-            {users.map((user) => (
+            {availableUsers.map((user) => (
               <div
                 key={user._id || user.id} // Ưu tiên _id từ Mongo
                 onClick={() => handleSelectUser(user)}

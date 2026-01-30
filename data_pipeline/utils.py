@@ -5,6 +5,10 @@ from pymongo import MongoClient #type: ignore
 import config as cfg #type: ignore
 from minio import Minio  #type: ignore
 from common.logger import get_logger
+from confluent_kafka.admin import AdminClient #type: ignore
+from confluent_kafka import KafkaException #type: ignore
+import time
+
 
 def get_spark_session(app_name):
     """
@@ -81,3 +85,35 @@ class GracefulStopper:
         else:
             # Nếu chưa có query nào chạy (đang khởi động), thoát luôn
             sys.exit(0)
+
+def wait_for_topic(topic_name, bootstrap_servers, logger, timeout=300):
+    """
+    Sử dụng Confluent Kafka AdminClient để kiểm tra topic.
+    """
+    logger.info(f"Đang kiểm tra topic '{topic_name}' trên {bootstrap_servers} (dùng confluent_kafka)...")
+    
+    # Cấu hình AdminClient
+    conf = {'bootstrap.servers': bootstrap_servers}
+    admin_client = AdminClient(conf)
+    
+    start_time = time.time()
+
+    while True:
+        try:
+            cluster_metadata = admin_client.list_topics(timeout=10)
+            if topic_name in cluster_metadata.topics:
+                logger.info(f"Đã tìm thấy topic '{topic_name}'. Bắt đầu Spark Job.")
+                return True
+            
+        except KafkaException as e:
+            logger.warning(f"Lỗi kết nối Kafka: {e}")
+        except Exception as e:
+            logger.warning(f"Lỗi không xác định khi check topic: {e}")
+
+        # Kiểm tra timeout tổng
+        if time.time() - start_time > timeout:
+            logger.error(f"Timeout! Topic '{topic_name}' không xuất hiện sau {timeout}s.")
+            raise TimeoutError(f"Topic {topic_name} not found")
+
+        logger.info(f"Topic '{topic_name}' chưa có. Đợi 10s...")
+        time.sleep(10)

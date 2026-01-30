@@ -14,7 +14,6 @@ RUN set -ex; \
 RUN pip install --upgrade pip setuptools wheel
 
 # 4. DOWNLOAD SPARK JARS (Tải thẳng vào thư mục jars của Spark)
-# Lưu ý: Phải tải đúng version tương thích
 WORKDIR /opt/spark/jars
 
 # --- A. Hadoop AWS & Dependencies (Cho MinIO/S3) ---

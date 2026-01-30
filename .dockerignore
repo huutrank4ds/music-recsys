@@ -1,0 +1,20 @@
+# Chặn __pycache__
+__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Chặn venv
+venv/
+.venv/
+env/
+
+# Chặn Git và cấu hình IDE
+.git
+.vscode
+.idea
+
+# Chặn file môi trường và data
+.env
+data/
+logs/
