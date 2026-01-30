@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { fetchRecommendations, fetchNextSongs } from '../services/recommendationService';
+import { fetchRecommendations, fetchNextSongs, recordUserListen } from '../services/recommendationService';
 import { logUserEvent } from '../services/loggingService';
 import { useAuth } from './AuthContext'; // Giả sử bạn đã tách Auth
 
@@ -45,6 +45,7 @@ export const MusicProvider = ({ children }) => {
   const durationRef = useRef(0); // Lưu tổng thời lượng
   const accumulatedTimeRef = useRef(0); // Tính thời gian nghe thực tế
   const lastStartTimeRef = useRef(0);
+  const hasSentShortTermUpdateRef = useRef(false);
 
   // State cho giao diện feed và sidebar
   const [viewList, setViewList] = useState([]);
@@ -113,8 +114,33 @@ export const MusicProvider = ({ children }) => {
 
   // Đồng bộ tiến độ và thời lượng từ player
   const handleUpdateProgress = useCallback((state) => {
-    progressRef.current = state;
-  }, []);
+    progressRef.current = state; // Giữ nguyên logic cũ
+
+    // --- LOGIC MỚI: KIỂM TRA 30 GIÂY ---
+    if (currentSong && user && !hasSentShortTermUpdateRef.current) {
+        
+        // 1. Tính toán thời gian nghe thực tế (giống logic createLogSnapshot)
+        const now = Date.now();
+        let currentSessionTime = accumulatedTimeRef.current;
+        
+        // Nếu đang play, cộng thêm khoảng thời gian từ lúc start đến hiện tại
+        if (isPlaying && lastStartTimeRef.current > 0) {
+            currentSessionTime += (now - lastStartTimeRef.current);
+        }
+
+        const listenSeconds = currentSessionTime / 1000;
+
+        // 2. Kiểm tra ngưỡng 30 giây
+        if (listenSeconds >= 30) {
+            // Đánh dấu đã gửi để không gửi lại
+            hasSentShortTermUpdateRef.current = true;
+            // Gọi API (Fire and forget - không cần await chặn UI)
+            recordUserListen(user._id, currentSong._id).catch(err => {
+                console.error("Lỗi ghi nhận bài nghe:", err);
+            });
+        }
+    }
+  }, [currentSong, user, isPlaying]);
 
   const handleUpdateDuration = useCallback((duration) => {
     durationRef.current = duration;
@@ -187,6 +213,7 @@ export const MusicProvider = ({ children }) => {
     setCurrentIndex(historyPlaylist.length);
     updateListenTimer('reset');
     setIsSongLoading(true);
+    hasSentShortTermUpdateRef.current = false;
     try {
       await fetchRecommendNextSongs(song._id || song.id, true);
     } catch (e) { console.error(e); }
@@ -203,6 +230,7 @@ export const MusicProvider = ({ children }) => {
       setIsPlaying(true);
       updateListenTimer('reset');
       setIsSongLoading(true);
+      hasSentShortTermUpdateRef.current = false;
     }
     const remainCount = playlist.length - index - 1;
     if (remainCount <= sidebarLimit / 2 && sidebarHasMore) {
@@ -233,6 +261,7 @@ export const MusicProvider = ({ children }) => {
     setIsPlaying(true);
     updateListenTimer('reset');
     setIsSongLoading(true);
+    hasSentShortTermUpdateRef.current = false;
 
     // Fetch more if near end
     const remainCount = playlist.length - nextIndex - 1;
@@ -259,19 +288,16 @@ export const MusicProvider = ({ children }) => {
   }, [currentIndex, playlist, currentSong, createLogSnapshot, updateListenTimer]);
 
   const handlePlayerStart = useCallback(() => {
-    console.log("Audio bắt đầu phát - Bắt đầu tính giờ");
     setIsSongLoading(false);
     updateListenTimer('play');
   }, [updateListenTimer]);
 
   const handlePlayerBuffer = useCallback(() => {
-    console.log("Buffering... Tạm dừng tính giờ");
     updateListenTimer('pause');
     setIsSongLoading(true);
   }, [updateListenTimer]);
 
   const handlePlayerBufferEnd = useCallback(() => {
-    console.log("Buffer xong - Tiếp tục tính giờ");
     updateListenTimer('play');
     setIsSongLoading(false);
   }, [updateListenTimer]);
@@ -296,7 +322,6 @@ export const MusicProvider = ({ children }) => {
   const cleanupMusicSession = useCallback(async () => {
     if (currentSong) {
       const snapshot = createLogSnapshot('logout');
-      console.log("Đang gửi log cuối trước khi logout...", snapshot);
       await sendLog(snapshot);
     }
     setIsPlaying(false);
@@ -325,8 +350,8 @@ export const MusicProvider = ({ children }) => {
         const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
         const success = navigator.sendBeacon(API_URL_SEND_LOG, blob);
 
-        if (success) {
-          console.log("Đã gửi log thoát trang thành công");
+        if (!success) {
+          console.error("sendBeacon không thành công, có thể mất dữ liệu log.");
         }
       }
     };

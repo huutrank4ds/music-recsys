@@ -22,3 +22,22 @@ async def search_songs(query, limit, skip) -> Any:
     except Exception as e:
         logger.error(f"Lỗi khi tìm kiếm bài hát: {e}")
         raise HTTPException(status_code=500, detail="Lỗi hệ thống khi tìm kiếm")
+    
+# API Lấy bài hát theo ID
+@router.get("/{song_id}", summary="Lấy bài hát theo ID")
+async def get_song_by_id(song_id: str) -> Any:
+    """
+    Lấy thông tin bài hát theo song_id.
+    URL gọi sẽ là: /api/search/{song_id}
+    """
+    try:
+        result = await search_service.get_song_by_id(song_id)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Bài hát không tìm thấy")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Lỗi khi lấy bài hát theo ID: {e}")
+        raise HTTPException(status_code=500, detail="Lỗi hệ thống khi lấy bài hát")

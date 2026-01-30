@@ -42,7 +42,7 @@ class MilvusSchemas:
         return {
             "metric_type": "IP", # Inner Product (Tốt cho Recommender System/Cosine Similarity)
             "index_type": "HNSW",
-            "params": {"M": 16, "efConstruction": 100}
+            "params": {"M": 16, "efConstruction": 200}
         }
 
     @staticmethod
@@ -52,7 +52,7 @@ class MilvusSchemas:
         """
         return {
             "metric_type": "IP",
-            "params": {"ef": 100}
+            "params": {"ef": 256}
         }
 
 

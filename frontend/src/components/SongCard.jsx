@@ -7,7 +7,6 @@ const SongCard = ({ song }) => {
 
   const handlePlay = () => {
     playFromViewList(song);
-    console.log('Playing song:', song);
   };
 
   return (

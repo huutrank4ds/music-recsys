@@ -97,3 +97,4 @@ models/
 verify_*.py
 test_hybrid_api.py
 test_mongo.py
+huggingface_cache/

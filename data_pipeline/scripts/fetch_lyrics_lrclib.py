@@ -1,15 +1,21 @@
+# /opt/src/scripts/fetch_lyrics_lrclib.py
+"""
+Fetch lyrics từ LRCLIB API và lưu vào MongoDB.
+Sử dụng asyncio và aiohttp để tăng tốc độ fetch nhiều requests song song.
+"""
 import asyncio
 import aiohttp
 import time
 import os
-from pymongo import MongoClient, UpdateOne
+from pymongo import MongoClient, UpdateOne #type: ignore
+import config as cfg
 
 # CONFIGURATION
 LRCLIB_API = "https://lrclib.net/api"
 
-MONGODB_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB = "music_recsys"
-MONGO_COLLECTION = "songs"
+MONGODB_URI = cfg.MONGO_URI
+MONGO_DB = cfg.MONGO_DB
+MONGO_COLLECTION = cfg.MONGO_SONGS_COLLECTION
 
 # Parallel settings
 MAX_CONCURRENT_REQUESTS = 20  

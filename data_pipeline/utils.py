@@ -16,6 +16,7 @@ def get_spark_session(app_name):
     """
     builder = SparkSession.builder \
         .appName(app_name) \
+        .config("spark.kafka.consumer.cache.enabled", "false") \
         .config("spark.hadoop.fs.s3a.endpoint", cfg.MINIO_ENDPOINT) \
         .config("spark.hadoop.fs.s3a.access.key", cfg.MINIO_ACCESS_KEY) \
         .config("spark.hadoop.fs.s3a.secret.key", cfg.MINIO_SECRET_KEY) \
@@ -27,13 +28,13 @@ def get_spark_session(app_name):
         
     return builder.getOrCreate()
 
-def get_mongo_collection(collection_name):
+def get_mongo_db_client():
     """
     Lấy object collection của MongoDB để thao tác (find, insert...).
     """
     client = MongoClient(cfg.MONGO_URI)
     db = client[cfg.MONGO_DB]
-    return db[collection_name]
+    return client, db
 
 def ensure_minio_bucket(bucket_name, logger=None):
     """

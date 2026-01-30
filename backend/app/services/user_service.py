@@ -33,8 +33,7 @@ class UserService:
         """
         try:
             user = await DB.db[cfg.MONGO_USERS_COLLECTION].find_one( #type: ignore
-                {"_id": user_id},
-                USER_SUMARY_PROJECTION
+                {"_id": user_id}
             )
                 
             return user

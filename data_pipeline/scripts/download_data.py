@@ -1,3 +1,7 @@
+# /opt/src/scripts/download_data.py
+"""
+Tải dataset từ HuggingFace và lưu dưới dạng Parquet trong thư mục data/raw.
+""" 
 from datasets import load_dataset
 from pathlib import Path
 import config as cfg
