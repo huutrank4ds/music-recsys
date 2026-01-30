@@ -1,3 +1,11 @@
+# /opt/src/scripts/prepare_simulation_log_extract_user_master_data.py
+"""
+Script để chuẩn bị dữ liệu logs nghe nhạc mô phỏng và trích xuất dữ liệu user master.
+1. Đọc các file Parquet đã xử lý sắp xếp từ data_pipeline/scripts
+2. Lọc và map các bản ghi nghe nhạc với dữ liệu bài hát từ MongoDB
+3. Xuất file Parquet chứa logs nghe nhạc mô phỏng
+4. Xuất file JSONL chứa dữ liệu user master
+"""
 from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq

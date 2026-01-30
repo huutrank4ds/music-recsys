@@ -1,3 +1,11 @@
+# /opt/src/scripts/extract_songs_to_file.py
+"""
+Khởi tạo dữ liệu bài hát master từ các file Parquet đã xử lý.
+1. Đọc các file Parquet từ thư mục dữ liệu đã xử lý.
+2. Chọn lọc các cột cần thiết và loại bỏ bản ghi trùng.
+3. Tạo các cột Metadata giả lập (ảnh bìa, URL, lượt nghe...).
+4. Ghi dữ liệu ra file JSON line.
+"""
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, lit, rand, udf

@@ -2,7 +2,9 @@ import React from 'react';
 import { Loader2 } from 'lucide-react';
 import SongListItem from './SongListItem';
 
-const SearchResultList = ({ query, results }) => {
+const SearchResultList = ({ query, results, isSearching, searchHasMore }) => {
+
+
     return (
         <div className="flex flex-col gap-2 pb-20 px-4">
             <p className="text-gray-400 mb-4 mt-4">Found results for "{query}"</p>

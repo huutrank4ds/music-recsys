@@ -10,9 +10,11 @@ Workflow:
 3. Lưu vào Milvus collection riêng
 """
 
-from pymongo import MongoClient
-from pymilvus import connections, Collection, utility
-from sentence_transformers import SentenceTransformer
+from pymongo import MongoClient #type: ignore
+from pymilvus import connections, Collection, utility #type: ignore
+from sentence_transformers import SentenceTransformer #type: ignore
+import os
+
 from tqdm import tqdm
 import config as cfg
 from common.logger import get_logger
@@ -42,6 +44,27 @@ EMBEDDING_DIM = cfg.EMBEDDING_DIM
 EMBEDDING_MODEL_NAME = cfg.EMBEDDING_MODEL
 BATCH_SIZE = 100
 MAX_SONGS = None  # None = xử lý tất cả
+
+# --- CẤU HÌNH MÔI TRƯỜNG HUGGINGFACE (PHẢI CHẠY TRƯỚC KHI IMPORT MODEL) ---
+# Chọn thư mục /tmp vì trong Docker user 'spark' luôn có quyền ghi tại đây
+HF_CACHE_DIR = "/tmp/huggingface_cache"
+
+# Tạo thư mục nếu chưa có
+if not os.path.exists(HF_CACHE_DIR):
+    os.makedirs(HF_CACHE_DIR, exist_ok=True)
+
+# Gán biến môi trường cho tất cả các thư viện liên quan
+os.environ['HF_HOME'] = HF_CACHE_DIR
+os.environ['TRANSFORMERS_CACHE'] = HF_CACHE_DIR
+os.environ['SENTENCE_TRANSFORMERS_HOME'] = HF_CACHE_DIR
+os.environ['HUGGINGFACE_HUB_CACHE'] = HF_CACHE_DIR
+os.environ['XET_LOG_DIR'] = os.path.join(HF_CACHE_DIR, "xet_logs")
+
+# Đảm bảo thư mục log của xet cũng tồn tại
+os.makedirs(os.environ['XET_LOG_DIR'], exist_ok=True)
+
+# In xác nhận để kiểm tra log khi chạy docker
+print(f"--- [Setup] HuggingFace Cache Dir: {os.environ['HF_HOME']} ---")
 
 # ============================================================
 # MAIN FUNCTIONS

@@ -97,6 +97,4 @@ models/
 verify_*.py
 test_hybrid_api.py
 test_mongo.py
-songs.jsonl
-songs_clean.jsonl
-users.jsonl
+huggingface_cache/

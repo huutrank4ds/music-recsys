@@ -16,8 +16,8 @@ from datetime import datetime, timedelta
 from pyspark.sql.functions import col, sum, when, lit
 from pyspark.ml.recommendation import ALS
 from pyspark.ml.feature import StringIndexer, IndexToString
-from pymongo import MongoClient, UpdateOne
-from pymilvus import connections, Collection, utility
+from pymongo import MongoClient, UpdateOne #type: ignore
+from pymilvus import connections, Collection, utility #type: ignore
 
 import config as cfg
 from utils import get_spark_session
@@ -127,7 +127,7 @@ def run_training():
         )
         
         model = als.fit(als_data)
-        logger.info("✅ Đã huấn luyện xong mô hình ALS!")
+        logger.info("Đã huấn luyện xong mô hình ALS!")
 
         # ---------------------------------------------------------
         # 6. Đồng bộ User Factors -> MongoDB

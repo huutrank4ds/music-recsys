@@ -83,11 +83,16 @@ services:
       - SPARK_MASTER_WEBUI_PORT=9090
       - SPARK_CONF_DIR=/opt/spark/conf
       - PYTHONPATH=/opt/src
+      - HF_HOME=/tmp/huggingface_cache
+      - TRANSFORMERS_CACHE=/tmp/huggingface_cache
+      - SENTENCE_TRANSFORMERS_HOME=/tmp/huggingface_cache
+      - HUGGINGFACE_HUB_CACHE=/tmp/huggingface_cache
+      - XET_LOG_DIR=/tmp/huggingface_cache/xet_logs
     volumes:
       - ./data:/opt/data
       - ./data_pipeline:/opt/src
       - ./common:/opt/src/common
-      - ./src/enrichment:/opt/src/enrichment
+      - ./huggingface_cache:/tmp/huggingface_cache
     depends_on:
       kafka:
         condition: service_healthy
@@ -130,6 +135,9 @@ services:
       - "9000:9000"
       - "9001:9001"
     command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY}
     env_file:
       - .env
     networks:
@@ -174,6 +182,7 @@ services:
       - ./data_pipeline:/opt/src
       - ./data:/opt/data
       - ./common:/opt/src/common
+    profiles: ["tools"]
     command: >
       /bin/bash -c "
         echo 'Starting Master Data Sync Job...';
@@ -256,6 +265,7 @@ services:
       - MINIO_ADDRESS=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_BUCKET_NAME=a-bucket
     env_file:
       - .env
     depends_on:

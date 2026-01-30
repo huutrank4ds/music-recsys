@@ -48,3 +48,16 @@ export const fetchNextSongs = async (userId, currentSongId, limit=32, refresh=fa
     return { next_songs: [], has_more: false };
   }
 };
+
+export const recordUserListen = async (userId, songId) => {
+  try {
+    const result = await fetch(`${API_URL}/record/${userId}/${songId}`, {
+      method: 'POST',
+    });
+    if (result.status == "success") {
+      console.log("Ghi nhận bài nghe thành công.");
+    }
+  } catch (error) {
+    console.error("Lỗi khi ghi nhận bài nghe:", error);
+  }
+};

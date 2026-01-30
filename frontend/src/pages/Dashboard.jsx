@@ -5,8 +5,6 @@ import { useAuth } from '../context/AuthContext';
 import { Search, LogOut, ArrowLeft, Loader2 } from 'lucide-react';
 
 // Components
-import SongCard from '../components/SongCard';
-import SongListItem from '../components/SongListItem';
 import RightSidebar from '../components/RightSidebar';
 import SearchResultList from '../components/SearchResultList';
 import ViewGrid from '../components/ViewGrid';
@@ -167,6 +165,8 @@ const Dashboard = () => {
             <SearchResultList 
               query={searchQuery} 
               results={searchResults}
+              isSearching={isSearching}
+              searchHasMore={searchHasMore}
             />
           )}
         </main>

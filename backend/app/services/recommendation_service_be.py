@@ -22,7 +22,7 @@ class RecommendationService:
         self._als_collection = None
         self._content_collection = None
         
-        self.search_params = search_params_milvus()
+        self.min_ef = 200
         self._milvus_available = True 
 
     @property
@@ -91,12 +91,16 @@ class RecommendationService:
         v_long_bytes = await DB.redis.get(long_key)
         if v_long_bytes:
             v_long = np.frombuffer(v_long_bytes, dtype=np.float32)
+            logger.info(f"User {user_id}: Lấy Long-term vector từ Redis.")
         else:
             user_data = await DB.db[cfg.MONGO_USERS_COLLECTION].find_one({"_id": user_id})
             if not user_data or "latent_vector" not in user_data or user_data["latent_vector"] is None:
                 return None
             v_long = np.array(user_data["latent_vector"], dtype=np.float32)
-            await DB.redis.setex(long_key, int(cfg.KEY_VECTOR_TTL), v_long.tobytes())
+            try:
+                await DB.redis.setex(long_key, int(cfg.KEY_VECTOR_TTL), v_long.tobytes())
+            except Exception as e:
+                logger.error(f"Lỗi lưu Long-term vector vào Redis: {e}")
         return v_long
         
     async def _get_short_vector(self, user_id: str, default: Optional[np.ndarray] = None) -> Optional[np.ndarray]:
@@ -169,7 +173,8 @@ class RecommendationService:
             query_result = await asyncio.to_thread(
                 collection.query,
                 expr=f"id == '{song_id}'",
-                output_fields=["embedding"]
+                output_fields=["embedding"],
+                consistency_level=3
             )
             
             if not query_result: return None
@@ -181,6 +186,42 @@ class RecommendationService:
             logger.error(f"[Milvus] Lỗi lấy embedding {song_id}: {e}")
             return None
 
+    # Cập nhật vector ngắn hạn khi user nghe bài hát
+    async def update_short_term_profile(self, user_id: str, song_id: str, decay_rate: float = 0.7):
+        """
+        Cập nhật Short-term Vector cho user dựa trên bài hát mới nghe
+        Câp nhật theo công thức Moving Average:
+        New_Short_Vector = (Old_Short_Vector * decay_rate) + (ALS_Song_Vector * (1 - decay_rate))
+        """
+        logger.info(f"Đang cập nhật Short-term cho User {user_id} với bài {song_id}")
+        
+        # Lấy vector ALS của bài hát
+        als_song_vector = await self._get_embedding_vector(
+            self.als_collection, 
+            song_id, 
+            cfg.ALS_VECTOR_KEY_PREFIX, 
+            cfg.ALS_VECTOR_TTL
+        )
+        
+        if als_song_vector is None:
+            logger.warning(f"Không tìm thấy vector ALS cho bài {song_id}. Bỏ qua update.")
+            return
+        try:
+            current_short_vec = await self._get_short_vector(user_id)
+            # Tính toán vector ngắn hạn mới
+            if current_short_vec is None:
+                new_short_vec = als_song_vector # Lần đầu tiên nghe
+            else:
+                # Công thức: Vector Mới = (Vector Cũ * decay) + (Vector Bài Hát * (1 - decay))
+                new_short_vec = (current_short_vec * decay_rate) + (als_song_vector * (1.0 - decay_rate))
+
+            # Lưu cache vào Redis (TTL 1 tiếng - 3600s)
+            short_key = f"{cfg.SHORT_KEY_PREFIX}{user_id}"
+            await DB.redis.setex(short_key, int(cfg.KEY_VECTOR_TTL/4), new_short_vec.tobytes())
+            
+        except Exception as e:
+            logger.error(f"Lỗi khi update short-term vector: {e}")
+
     # Hàm tìm kiếm chung
     async def _search_milvus(self, collection: Collection, vector: List[float], top_k: int, exclude_ids: Optional[List[Any]] = None) -> dict:
         if collection is None: return {}
@@ -190,16 +231,19 @@ class RecommendationService:
         buffer_size = len(exclude_set)
         MAX_SEARCH_LIMIT = 500 
         search_limit = min(top_k + buffer_size + 20, MAX_SEARCH_LIMIT)
+        dynamic_ef = min(max(self.min_ef, int(search_limit * 1.5)), 2048)
+
         try:
             # Thực hiện tìm kiếm trong Milvus
             results = await asyncio.to_thread(
                 collection.search,
                 data=[vector],
                 anns_field="embedding",
-                param=self.search_params,
+                param={"metric_type": "IP", "ef": dynamic_ef},
                 limit=search_limit, 
                 expr=None,
-                output_fields=["id"]
+                output_fields=["id"],
+                consistency_level=3
             )
             if not results: return {}
             score_map = {}
@@ -360,7 +404,6 @@ class RecommendationService:
             pipe.scard(session_key) # Lấy tổng đã load
             pipe.llen(feed_key)     # Lấy hàng tồn kho
             total_generated, current_in_queue = await pipe.execute()
-        logger.info(f"User {user_id}: Feed hiện có {current_in_queue} bài, đã tạo tổng {total_generated} bài.")
         
         # Logic bơm hàng (refill) thông minh
         # Chỉ bơm khi kho sắp hết và chưa chạm trần
@@ -383,8 +426,7 @@ class RecommendationService:
                     
                     await DB.redis.sadd(session_key, *new_batch_ids)
                     await DB.redis.expire(session_key, int(cfg.FEED_TTL))
-                    
-                    logger.info(f"Bơm thêm {len(new_batch_ids)} bài cho feed user {user_id}.")
+
                     addcount = len(new_batch_ids)
                     current_in_queue += addcount
                     total_generated += addcount
@@ -466,18 +508,21 @@ class RecommendationService:
         pool_limit = int(limit * multiplier)
         pool_limit = max(pool_limit, cfg.PLAYLIST_MIN_THRESHOLD) # Tối thiểu vẫn phải lấy đủ dùng
 
-        search_exclude_ids = (exclude_ids or []).append(current_song_id)
+        search_exclude_ids = (exclude_ids or []) + [current_song_id]
 
         async def _task_search_als():
             try:
                 v_long, v_short, v_session = await self._get_session_vector(user_id)
                 if v_session is not None:
-                    return await self._search_milvus(
+                    als_result = await self._search_milvus(
                         self.als_collection,
                         vector=v_session.tolist(),
                         top_k=pool_limit,
                         exclude_ids=search_exclude_ids
                     )
+                if  als_result:
+                    logger.info(f"User {user_id}: Tìm được {len(als_result)} bài từ ALS cho next songs.")
+                    return als_result
             except Exception as e:
                 logger.error(f"Lỗi tìm kiếm ALS: {e}")
             return {}
@@ -490,17 +535,20 @@ class RecommendationService:
                 )
                 if curr_emb is None: return {}
 
-                return await self._search_milvus(
+                content_result = await self._search_milvus(
                     self.content_collection,
                     vector=curr_emb.tolist(),
                     top_k=pool_limit,
                     exclude_ids=search_exclude_ids
                 )
+                if content_result:
+                    logger.info(f"User {user_id}: Tìm được {len(content_result)} bài từ Content cho next songs.")
+                    return content_result
             except Exception as e:
                 logger.error(f"Lỗi tìm kiếm Content: {e}")
             return {}
         als_map, content_map = await asyncio.gather(_task_search_als(), _task_search_content())
-        merged_ids = self._merge_score_maps(als_map, content_map, limit=limit, weight_als=0.3)
+        merged_ids = self._merge_score_maps(als_map, content_map, limit=limit, weight_als=0.6)
         return merged_ids
 
     # Get next songs based on current song

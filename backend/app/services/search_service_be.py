@@ -17,18 +17,18 @@ class SearchService:
         Tạo Text Index cho collection songs 
         """
         try:
-            await DB.db[cfg.COLLECTION_SONGS].create_index( #type: ignore
+            await DB.db[cfg.MONGO_SONGS_COLLECTION].create_index(
                 [("track_name", "text"), ("artist_name", "text")],
                 name="song_search_index_v2",
                 weights={"track_name": 10, "artist_name": 5}
             )
             logger.info("Tạo Text Index cho collection songs thành công.")
-            await DB.db[cfg.COLLECTION_SONGS].create_index( #type: ignore
+            await DB.db[cfg.MONGO_SONGS_COLLECTION].create_index(
                 [("plays_7d", -1)],
                 name="idx_plays_7d_desc"
             )
             logger.info("Tạo Index cho plays_7d giảm dần thành công.")
-            await DB.db[cfg.COLLECTION_SONGS].create_index( #type: ignore
+            await DB.db[cfg.MONGO_SONGS_COLLECTION].create_index(
                 [("plays_cumulative", -1)],
                 name="idx_plays_cumulative_desc"
             )
@@ -56,7 +56,7 @@ class SearchService:
                 {"$limit": limit + 1} # Lấy limit + 1 để kiểm tra has_more
             ]
 
-            cursor = DB.db[cfg.COLLECTION_SONGS].aggregate(pipeline) #type: ignore
+            cursor = DB.db[cfg.MONGO_SONGS_COLLECTION].aggregate(pipeline)
             songs = await cursor.to_list(length=limit + 1)
             
             if len(songs) > limit:
@@ -88,7 +88,7 @@ class SearchService:
         }
         
         try:
-            cursor = DB.db[cfg.COLLECTION_SONGS].find(filter_query, SONG_SUMMARY_PROJECTION) #type: ignore
+            cursor = DB.db[cfg.MONGO_SONGS_COLLECTION].find(filter_query, SONG_SUMMARY_PROJECTION)
             songs = await cursor.skip(skip).limit(limit + 1).to_list(length=limit + 1)
             
             if len(songs) > limit:
@@ -112,5 +112,18 @@ class SearchService:
                 "data": [],
                 "meta": {"has_more": False, "limit": limit, "skip": skip}
             }
+        
+    async def get_song_by_id(self, song_id: str) -> Optional[dict]:
+        try:
+            # Tìm kiếm bằng id thì trả về toàn bộ thông tin bài hát
+            song = await DB.db[cfg.MONGO_SONGS_COLLECTION].find_one(
+                {"_id": song_id},
+            ) 
+            return {
+                "song": song
+            }
+        except Exception as e:
+            logger.error(f"Lỗi khi lấy bài hát theo ID {song_id}: {e}")
+            return None
 
 search_service = SearchService()

@@ -46,3 +46,21 @@ async def get_next_songs(user_id: str, current_song_id: str, limit: int = num_de
             "has_more": False,
             "next_songs": [],
         }
+    
+@router.post("/record/{user_id}/{song_id}")
+async def update_short_term_profile(user_id: str, song_id: str, decay_rate: float = 0.7):
+    """
+    Cập nhật Short-term Vector cho user dựa trên bài hát mới nghe.
+    """
+    try:
+        await recommendation_service.update_short_term_profile(user_id, song_id, decay_rate)
+        return {
+            "status": "success", 
+            "message": f"Đã cập nhật Short-term vector cho user {user_id}."
+        }
+    except Exception as e:
+        logger.error(f"Lỗi khi cập nhật Short-term vector cho user {user_id} với bài {song_id}: {str(e)}")
+        return {
+            "status": "error", 
+            "message": f"Lỗi khi cập nhật Short-term vector: {str(e)}"
+        }
