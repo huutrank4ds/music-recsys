@@ -121,11 +121,16 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | :--- | :--- | :--- |
 | `_id` | String | **PK**. Track ID (UUID). |
 | `track_name` | String | Tên bài hát. |
+| `artist_id` | String | ID nghệ sĩ |
 | `artist_name` | String | Tên nghệ sĩ. |
+| `image_url` | String | Ảnh bìa bài hát. |
+| `url` | String | Đường dẫn bài hát. |
+| `duration` | Double | Thời lượng bài hát. |
 | `plays_7d` | Int | Lượt nghe trong 7 ngày gần nhất (Trending). |
 | `plays_cumulative` | Long | Tổng lượt nghe tích lũy. |
 | `lrclib_plain_lyrics`| String | Lời bài hát (Raw text). |
-| `embedding` | Array | Vector đặc trưng (Optional). |
+| `lrclib_synced_lyrics` | String | Lời bài hát có thời gian. |
+| `release_date` | Date | Ngày update. |
 
 #### Collection: `users`
 > Lưu trữ vector sở thích dài hạn (Long-term profile).
@@ -135,6 +140,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `_id` | String | **PK**. User ID. |
 | `username` | String | Tên hiển thị. |
 | `latent_vector` | Array `<Float>` | Vector ALS `[0.1, -0.5, ...]` (64 dims). |
+| `signup_date` | Date | Ngày đăng kí. |
+| `image_url` | String | Ảnh đại diện. |
 
 ### Phase 2. Milvus (Vector Database)
 
@@ -153,8 +160,6 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 ## 🔄 Operational Workflow
 
 Hệ thống hoạt động theo luồng khép kín từ thu thập dữ liệu (Streaming) đến huấn luyện (Batch) và phục vụ (Serving).
-
-
 
 [Image of System Architecture Diagram]
 
