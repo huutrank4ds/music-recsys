@@ -118,6 +118,7 @@ class MusicStreamPlayer:
 # ================= MAIN RUN =================
 def run():
     import argparse
+    import time # Đảm bảo đã import time
     
     parser = argparse.ArgumentParser()
     parser.add_argument("--speed", type=float, default=200.0, help="Tốc độ replay (mặc định x200)")
@@ -138,12 +139,11 @@ def run():
     )
 
     total_sent = 0
+    batch_start_time = time.time() # [MỚI] Mốc thời gian bắt đầu đợt 1000 tin
     
     try:
         for log_request in player.stream_records():
             if log_request:
-                # log_request lúc này đã là object UserLogRequest hoàn chỉnh với timestamp mới
-                
                 # Serialize sang JSON string -> Bytes
                 msg_dict = log_request.dict()
                 msg_bytes = json.dumps(msg_dict).encode('utf-8')
@@ -151,16 +151,33 @@ def run():
                 kafka_manager.produce(cfg.KAFKA_TOPIC, msg_bytes)
                 
                 total_sent += 1
+                
+                # Logic in log mỗi 1000 tin
                 if total_sent % 1000 == 0:
+                    current_time = time.time()
+                    elapsed_time = current_time - batch_start_time
+                    
+                    # [MỚI] Tính tốc độ (logs/s)
+                    if elapsed_time > 0:
+                        rate = 1000 / elapsed_time
+                    else:
+                        rate = 0 # Tránh chia cho 0 nếu quá nhanh
+
                     # In ra timestamp giả lập để dễ debug
                     ts = log_request.timestamp if log_request.timestamp else 0
                     ts_preview = datetime.fromtimestamp(ts / 1000).strftime('%Y-%m-%d %H:%M:%S')
-                    logger.info(f"\r[Sim] Sent: {total_sent} logs | Last TS: {ts_preview} | Speed: x{speed_factor}")
+                    
+                    # [CẬP NHẬT] Thêm hiển thị Rate
+                    # Sử dụng \033[K để xóa tàn dư dòng cũ nếu dòng mới ngắn hơn
+                    logger.info(f"\r[Sim] Sent: {total_sent} | Rate: {rate:6.1f} logs/s | Last TS: {ts_preview} | Speed: x{speed_factor} \033[K")
+                    
+                    # [MỚI] Reset mốc thời gian cho đợt 1000 tin tiếp theo
+                    batch_start_time = current_time
 
-        logger.info(f"HOÀN TẤT! Tổng log đã gửi: {total_sent}")
+        logger.info(f"\nHOÀN TẤT! Tổng log đã gửi: {total_sent}")
 
     except KeyboardInterrupt:
-        logger.info("Dừng giả lập.")
+        logger.info("\nDừng giả lập.")
     except Exception as e:
         logger.error(f"Lỗi Fatal: {e}")
     finally:
