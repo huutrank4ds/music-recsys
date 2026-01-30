@@ -214,38 +214,54 @@ $$
 
 ```mermaid
 graph TD
-    subgraph "Ingestion & Data Lake"
-        FE[Frontend WebApp] -->|API Call| BE[Backend API]
-        BE -->|Push Log| Kafka[Kafka: music_log]
-        Kafka -->|Spark Streaming| MinIO[(MinIO: Data Lake)]
+    %% --- ACTORS ---
+    UI["Frontend UI"]
+    Sim["Simulated Logs"]
+    
+    %% --- REAL-TIME SESSION LOOP (Serving Layer) ---
+    subgraph "Real-time Session Logic"
+        API["Backend API"]
+        Redis[("Redis: Session Cache")]
+        
+        UI <-->|"1. Req/Res (Get Recs)"| API
+        API <-->|"2. Get/Update v_short"| Redis
+        
+        %% Note: Logic API cache v_long từ Mongo vào Redis
+        noteRedis[/"API đọc v_long từ Mongo<br/>lưu vào Redis"/]
+        Redis -.- noteRedis
     end
 
+    %% --- INGESTION PIPELINE (Speed Layer Input) ---
+    subgraph "Data Ingestion"
+        direction TB
+        UI -->|"Log Event"| API
+        Sim -->|"Log Event"| Kafka["Kafka Topic: music_log"]
+        API -->|"Push Log"| Kafka
+        Kafka -->|"Spark Streaming"| MinIO[("MinIO: Data Lake")]
+    end
+
+    %% --- BATCH PROCESSING & STORAGE (Batch Layer) ---
     subgraph "Batch Processing"
-        MinIO -->|Read Delta (15m)| Spark15m[Spark Job: Update Plays]
-        Spark15m -->|Update| DB_Songs[(MongoDB: Songs)]
+        direction TB
+        MinIO -->|"Read delta (15m)"| Spark15m["Spark Job: Update Stats"]
+        MinIO -->|"Read 90 days"| SparkALS["Spark Job: ALS Training"]
+        MinIO -->|"Read delta (Nightly)"| SparkNight["Spark Job: Nightly Stats"]
         
-        MinIO -->|Read All (Nightly)| SparkNight[Spark Job: Nightly]
-        SparkNight -->|Calc plays_7d| DB_Songs
-        SparkNight -->|Train ALS| ALS_Model
-    end
-
-    subgraph "Vector Storage"
-        ALS_Model -->|User Vec| DB_Users[(MongoDB: Users)]
-        ALS_Model -->|Item Vec| Milvus_CF[(Milvus: music_col)]
-        BERT[BERT Model] -->|Lyrics Vec| Milvus_Content[(Milvus: lyrics_col)]
-    end
-
-    subgraph "Serving Layer (Hybrid)"
-        Redis[(Redis: Short-term Session)]
+        %% Database Updates
+        Spark15m -->|"Update songs col"| MongoDB[("MongoDB")]
+        SparkNight -->|"Resync songs col"| MongoDB
+        SparkALS -->|"Update users col"| MongoDB
+        SparkALS -->|"Write music col"| Milvus[("Milvus")]
         
-        Logic[Recommendation Logic]
-        Logic -->|Get Long-term| DB_Users
-        Logic -->|Get Short-term| Redis
-        Logic -->|Search (0.6)| Milvus_CF
-        Logic -->|Search (0.4)| Milvus_Content
+        %% Content Enrichment
+        MongoDB -->|"Read songs col"| BERT["BERT Inference"]
+        BERT -->|"Write lyrics emb"| Milvus
     end
 
-    BE <--> Logic
+    %% --- SERVING CONNECTIONS (Retrieval) ---
+    %% API orchestration: API là trung tâm kết nối DB
+    API -.->|"Read Metadata/User Profile"| MongoDB
+    API -.->|"Vector Search (Candidates)"| Milvus
 ```
 
 ## ✅ Implementation Checklist (Tiến độ thực hiện)
