@@ -1,7 +1,7 @@
 # app/api/user_api.py
 from typing import Any
 from fastapi import APIRouter, HTTPException #type: ignore
-from app.services.user_service import UserService
+from app.services.user_service_be import UserService
 from common.logger import get_logger
 from pydantic import BaseModel #type: ignore
 

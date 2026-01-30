@@ -187,7 +187,7 @@ class RecommendationService:
             return None
 
     # Cập nhật vector ngắn hạn khi user nghe bài hát
-    async def update_short_term_profile(self, user_id: str, song_id: str, decay_rate: float = 0.7):
+    async def update_short_term_profile(self, user_id: str, song_id: str, decay_rate: float = 0.5):
         """
         Cập nhật Short-term Vector cho user dựa trên bài hát mới nghe
         Câp nhật theo công thức Moving Average:

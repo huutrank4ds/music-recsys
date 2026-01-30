@@ -11,7 +11,7 @@ from app.services.logging_service_be import logging_service
 from app.services.recommendation_service_be import recommendation_service
 from common.logger import get_logger
 
-from app.api.recommemdation_api import router as recommendation_router
+from app.api.recommendation_api import router as recommendation_router
 from app.api.search_api import router as search_router
 from app.api.logging_api import router as logging_router
 from app.api.user_api import router as user_router
