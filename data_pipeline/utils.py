@@ -46,7 +46,7 @@ def ensure_minio_bucket(bucket_name, logger=None):
     
     # Lưu ý: Chạy trong Docker nên endpoint là minio:9000
     # Cần cắt bỏ 'http://' vì thư viện Minio không cần scheme
-    endpoint = cfg.MINIO_ENDPOINT.replace("http://", "")
+    endpoint = cfg.MINIO_ENDPOINT.replace("http://", "") #type: ignore
     
     client = Minio(
         endpoint,
