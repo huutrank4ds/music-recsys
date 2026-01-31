@@ -168,7 +168,7 @@ Hệ thống hoạt động theo luồng khép kín từ thu thập dữ liệu 
 1.  **Event Capture:** Frontend gọi API gửi log hành vi (`listen`, `skip`, `complete`) vào Backend.
 2.  **Message Queue:** Backend đẩy log vào Kafka topic `music_log`.
 3.  **Data Lake Sink:** Spark Streaming đọc dữ liệu từ Kafka và ghi xuống **MinIO** (Data Lake) dưới định dạng Parquet.
-4.  **Near Real-time Stats:** Job Spark chạy định kỳ mỗi 15 phút, cập nhật tổng lượt nghe và lượt nghe trong 7 ngày cho bài hát trong MongoDB.
+4.  **Near Real-time Stats:** Job Spark chạy định kỳ mỗi 5 phút, cập nhật tổng lượt nghe và lượt nghe trong 7 ngày cho bài hát trong MongoDB.
 
 ### 🔹 Phase 2: Batch Processing & Enrichment
 1.  **Weekly Trending (Nightly):** Job Spark chạy mỗi đêm, tính toán tổng lượt nghe trong 7 ngày gần nhất (`plays_7d`) cập nhật vào MongoDB để phục vụ BXH Trending.
