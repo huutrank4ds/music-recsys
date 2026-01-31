@@ -363,8 +363,7 @@ docker compose run --rm job-sync-master
 Vào giao diện Minio ở địa chỉ http://localhost:9001, nhập username và password bằng giá trị đã set trong tệp môi trường .env. Vào bucket liên kết Milvus và import file `embeddings_lyrics.parquet` từ thư mục `data/lyrics_data` vào. Sau đó chạy lệnh để nạp dữ liệu vector lời bài hát vào
 `lyrics_embeddings` collection trong Milvus.
 ```bash
-docker exec -it spark-master bash
-python3 /opt/src/batch/import_embedding_lyrics_collection.py
+docker exec -it spark-master python3 /opt/src/batch/import_embedding_lyrics_collection.py
 ```
 
 ### 3. Kiểm tra trạng thái & Truy cập Dashboard
@@ -379,8 +378,7 @@ python3 /opt/src/batch/import_embedding_lyrics_collection.py
 ### 4. Chạy giả lập dữ liệu (Simulate Traffic)
 Chạy script giả lập để sinh log hành vi (listen, skip, complete) đẩy vào Kafka. Log giả lập này chỉ có hành vi complete, có thể sử dụng để huấn luyện ALS.
 ```bash
-docker exec -it music-backend bash
-python3 /app/scripts/simulate_traffic.py --speed 200
+docker exec -it music-backend python3 /app/scripts/simulate_traffic.py --speed 200
 ```
 
 ### 5. Dừng hệ thống
