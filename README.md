@@ -121,11 +121,16 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | :--- | :--- | :--- |
 | `_id` | String | **PK**. Track ID (UUID). |
 | `track_name` | String | Tên bài hát. |
+| `artist_id` | String | ID nghệ sĩ |
 | `artist_name` | String | Tên nghệ sĩ. |
+| `image_url` | String | Ảnh bìa bài hát. |
+| `url` | String | Đường dẫn bài hát. |
+| `duration` | Double | Thời lượng bài hát. |
 | `plays_7d` | Int | Lượt nghe trong 7 ngày gần nhất (Trending). |
 | `plays_cumulative` | Long | Tổng lượt nghe tích lũy. |
 | `lrclib_plain_lyrics`| String | Lời bài hát (Raw text). |
-| `embedding` | Array | Vector đặc trưng (Optional). |
+| `lrclib_synced_lyrics` | String | Lời bài hát có thời gian. |
+| `release_date` | Date | Ngày update. |
 
 #### Collection: `users`
 > Lưu trữ vector sở thích dài hạn (Long-term profile).
@@ -135,6 +140,8 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 | `_id` | String | **PK**. User ID. |
 | `username` | String | Tên hiển thị. |
 | `latent_vector` | Array `<Float>` | Vector ALS `[0.1, -0.5, ...]` (64 dims). |
+| `signup_date` | Date | Ngày đăng kí. |
+| `image_url` | String | Ảnh đại diện. |
 
 ### Phase 2. Milvus (Vector Database)
 
@@ -154,8 +161,6 @@ Hệ thống sử dụng mô hình lưu trữ lai (Polyglot Persistence): **Mong
 
 Hệ thống hoạt động theo luồng khép kín từ thu thập dữ liệu (Streaming) đến huấn luyện (Batch) và phục vụ (Serving).
 
-
-
 [Image of System Architecture Diagram]
 
 
@@ -163,7 +168,7 @@ Hệ thống hoạt động theo luồng khép kín từ thu thập dữ liệu 
 1.  **Event Capture:** Frontend gọi API gửi log hành vi (`listen`, `skip`, `complete`) vào Backend.
 2.  **Message Queue:** Backend đẩy log vào Kafka topic `music_log`.
 3.  **Data Lake Sink:** Spark Streaming đọc dữ liệu từ Kafka và ghi xuống **MinIO** (Data Lake) dưới định dạng Parquet.
-4.  **Near Real-time Stats:** Job Spark chạy định kỳ mỗi 15 phút, cập nhật tổng lượt nghe và lượt nghe trong 7 ngày cho bài hát trong MongoDB.
+4.  **Near Real-time Stats:** Job Spark chạy định kỳ mỗi 5 phút, cập nhật tổng lượt nghe và lượt nghe trong 7 ngày cho bài hát trong MongoDB.
 
 ### 🔹 Phase 2: Batch Processing & Enrichment
 1.  **Weekly Trending (Nightly):** Job Spark chạy mỗi đêm, tính toán tổng lượt nghe trong 7 ngày gần nhất (`plays_7d`) cập nhật vào MongoDB để phục vụ BXH Trending.
@@ -172,7 +177,7 @@ Hệ thống hoạt động theo luồng khép kín từ thu thập dữ liệu 
     * Lưu vào Milvus (`lyrics_embeddings`) phục vụ Content-based Filtering.
 
 ### 🔹 Phase 3: Model Training (Collaborative Filtering)
-1.  **Training:** Job Spark chạy hàng đêm đọc lịch sử từ MinIO, huấn luyện mô hình ALS (Alternating Least Squares).
+1.  **Training:** Job Spark chạy hàng đêm đọc lịch sử từ MinIO (90 ngày gần nhất), huấn luyện mô hình ALS (Alternating Least Squares).
 2.  **Vector Sync:**
     * **User Vectors:** Lưu vào MongoDB (`users`).
     * **Item Vectors:** Lưu vào Milvus (`music_collection`).
@@ -214,38 +219,54 @@ $$
 
 ```mermaid
 graph TD
-    subgraph "Ingestion & Data Lake"
-        FE[Frontend WebApp] -->|API Call| BE[Backend API]
-        BE -->|Push Log| Kafka[Kafka: music_log]
-        Kafka -->|Spark Streaming| MinIO[(MinIO: Data Lake)]
+    %% --- ACTORS ---
+    UI["Frontend UI"]
+    Sim["Simulated Logs"]
+    
+    %% --- REAL-TIME SESSION LOOP (Serving Layer) ---
+    subgraph "Real-time Session Logic"
+        API["Backend API"]
+        Redis[("Redis: Session Cache")]
+        
+        UI <-->|"1. Req/Res (Get Recs)"| API
+        API <-->|"2. Get/Update v_short"| Redis
+        
+        %% Note: Logic API cache v_long từ Mongo vào Redis
+        noteRedis[/"API đọc v_long từ Mongo<br/>lưu vào Redis"/]
+        Redis -.- noteRedis
     end
 
+    %% --- INGESTION PIPELINE (Speed Layer Input) ---
+    subgraph "Data Ingestion"
+        direction TB
+        UI -->|"Log Event"| API
+        Sim -->|"Log Event"| Kafka["Kafka Topic: music_log"]
+        API -->|"Push Log"| Kafka
+        Kafka -->|"Spark Streaming"| MinIO[("MinIO: Data Lake")]
+    end
+
+    %% --- BATCH PROCESSING & STORAGE (Batch Layer) ---
     subgraph "Batch Processing"
-        MinIO -->|Read Delta (15m)| Spark15m[Spark Job: Update Plays]
-        Spark15m -->|Update| DB_Songs[(MongoDB: Songs)]
+        direction TB
+        MinIO -->|"Read delta (15m)"| Spark15m["Spark Job: Update Stats"]
+        MinIO -->|"Read 90 days"| SparkALS["Spark Job: ALS Training"]
+        MinIO -->|"Read delta (Nightly)"| SparkNight["Spark Job: Nightly Stats"]
         
-        MinIO -->|Read All (Nightly)| SparkNight[Spark Job: Nightly]
-        SparkNight -->|Calc plays_7d| DB_Songs
-        SparkNight -->|Train ALS| ALS_Model
-    end
-
-    subgraph "Vector Storage"
-        ALS_Model -->|User Vec| DB_Users[(MongoDB: Users)]
-        ALS_Model -->|Item Vec| Milvus_CF[(Milvus: music_col)]
-        BERT[BERT Model] -->|Lyrics Vec| Milvus_Content[(Milvus: lyrics_col)]
-    end
-
-    subgraph "Serving Layer (Hybrid)"
-        Redis[(Redis: Short-term Session)]
+        %% Database Updates
+        Spark15m -->|"Update songs col"| MongoDB[("MongoDB")]
+        SparkNight -->|"Resync songs col"| MongoDB
+        SparkALS -->|"Update users col"| MongoDB
+        SparkALS -->|"Write music col"| Milvus[("Milvus")]
         
-        Logic[Recommendation Logic]
-        Logic -->|Get Long-term| DB_Users
-        Logic -->|Get Short-term| Redis
-        Logic -->|Search (0.6)| Milvus_CF
-        Logic -->|Search (0.4)| Milvus_Content
+        %% Content Enrichment
+        MongoDB -->|"Read songs col"| BERT["BERT Inference"]
+        BERT -->|"Write lyrics emb"| Milvus
     end
 
-    BE <--> Logic
+    %% --- SERVING CONNECTIONS (Retrieval) ---
+    %% API orchestration: API là trung tâm kết nối DB
+    API -.->|"Read Metadata/User Profile"| MongoDB
+    API -.->|"Vector Search (Candidates)"| Milvus
 ```
 
 ## ✅ Implementation Checklist (Tiến độ thực hiện)
@@ -281,7 +302,9 @@ Dưới đây là danh sách các hạng mục công việc cần hoàn thành �
 
 - [X] **Song Metadata Sync**
   - [X] Import dữ liệu bài hát/nghệ sĩ vào MongoDB collection `songs`.
-  - [X] Đánh index tối ưu cho việc truy vấn.
+  - [X] Đánh index tối ưu cho việc truy vấn tên bài hát/nghệ sĩ.
+- [X] **User Metadata Sync**
+  - [X] Import dữ liệu người dùng vào MongoDB collection `user`.
 - [X] **Content Enrichment**
   - [X] Fetch lời bài hát (Lyrics) từ API.
   - [X] **Embedding:** Dùng BERT trích xuất vector từ Lyrics.
@@ -342,8 +365,7 @@ docker compose run --rm job-sync-master
 Vào giao diện Minio ở địa chỉ http://localhost:9001, nhập username và password bằng giá trị đã set trong tệp môi trường .env. Vào bucket liên kết Milvus và import file `embeddings_lyrics.parquet` từ thư mục `data/lyrics_data` vào. Sau đó chạy lệnh để nạp dữ liệu vector lời bài hát vào
 `lyrics_embeddings` collection trong Milvus.
 ```bash
-docker exec -it spark-master bash
-python3 /opt/src/batch/import_embedding_lyrics_collection.py
+docker exec -it spark-master python3 /opt/src/batch/import_embedding_lyrics_collection.py
 ```
 
 ### 3. Kiểm tra trạng thái & Truy cập Dashboard
@@ -358,8 +380,7 @@ python3 /opt/src/batch/import_embedding_lyrics_collection.py
 ### 4. Chạy giả lập dữ liệu (Simulate Traffic)
 Chạy script giả lập để sinh log hành vi (listen, skip, complete) đẩy vào Kafka. Log giả lập này chỉ có hành vi complete, có thể sử dụng để huấn luyện ALS.
 ```bash
-docker exec -it music-backend bash
-python3 /app/scripts/simulate_traffic.py --speed 200
+docker exec -it music-backend python3 /app/scripts/simulate_traffic.py --speed 200
 ```
 
 ### 5. Dừng hệ thống

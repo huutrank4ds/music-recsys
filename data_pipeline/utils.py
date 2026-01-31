@@ -24,7 +24,9 @@ def get_spark_session(app_name):
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
         .config("spark.mongodb.read.connection.uri", cfg.MONGO_URI) \
-        .config("spark.mongodb.write.connection.uri", cfg.MONGO_URI)
+        .config("spark.mongodb.write.connection.uri", cfg.MONGO_URI) \
+        .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer") \
+        .config("spark.kryoserializer.buffer.max", "128m")
         
     return builder.getOrCreate()
 

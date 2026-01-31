@@ -46,13 +46,13 @@ class MilvusSchemas:
         }
 
     @staticmethod
-    def search_params() -> dict:
+    def search_params(ef) -> dict:
         """
         Cấu hình Search (ef càng lớn tìm càng chính xác nhưng chậm hơn).
         """
         return {
             "metric_type": "IP",
-            "params": {"ef": 256}
+            "params": {"ef": ef}
         }
 
 

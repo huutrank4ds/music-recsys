@@ -77,6 +77,7 @@ services:
     ports:
       - "9090:9090"
       - "7077:7077"
+      - "4040:4040"
     env_file:
       - .env
     environment:

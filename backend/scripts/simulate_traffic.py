@@ -17,18 +17,22 @@ NAME_TASK = "Simulate Traffic"
 logger = get_logger(NAME_TASK)
 
 class MusicStreamPlayer:
-    def __init__(self, data_dir=cfg.MUSIC_LOGS_DATA_PATH, file_name="listening_history.parquet", speed_factor=200.0, max_sleep_sec=2.0, simulation_lag=5184000000):
+    def __init__(self, data_dir=cfg.MUSIC_LOGS_DATA_PATH, file_name="listening_history.parquet", 
+                 speed_factor=200.0, max_sleep_sec=2.0, simulation_lag=5184000000,
+                 auto_realtime=True): # Thêm tùy chọn auto_realtime
         self.data_dir = Path(data_dir)
         self.file_name = file_name
         self.speed_factor = speed_factor
         self.max_sleep_sec = max_sleep_sec
+        self.auto_realtime = auto_realtime # Lưu trạng thái tùy chọn
         
         # State variables
-        self.first_data_ts = None     # Timestamp gốc của bản ghi đầu tiên trong file
-        self.wall_clock_start = None  # Thời gian thực tế lúc bắt đầu chạy script
-        self.time_offset = 0          # Độ lệch cần cộng vào timestamp gốc
+        self.first_data_ts = None
+        self.wall_clock_start = None
+        self.time_offset = 0
         self.time_skip_accumulation = 0
-        self.simulation_lag = simulation_lag # Độ trễ giả lập (mặc định 2 tháng = 5184000000 ms)
+        self.simulation_lag = simulation_lag
+        self.prev_ts_val = None # Lưu timestamp trước đó để tính gap
 
     def stream_records(self):
         """Generator trả về UserLogRequest"""
@@ -56,52 +60,57 @@ class MusicStreamPlayer:
                     yield log_request
 
     def _process_time_travel(self, record: dict) -> Optional[UserLogRequest]:
-        """
-        1. Tính toán thời gian sleep để giả lập tốc độ.
-        2. Tính timestamp mới = (RealTime_Start - Lag) + (Relative_Time_In_Log).
-        3. Trả về UserLogRequest.
-        """
         ts_val = record.get('timestamp')
-        
-        # Bỏ qua nếu dữ liệu lỗi
         if ts_val is None: return None
 
-        # Khởi tạo offset và thời gian bắt đầu từ bản ghi đầu tiên
+        now_ms = int(time.time() * 1000)
+
+        # 1. Khởi tạo các mốc thời gian tại bản ghi đầu tiên
         if self.first_data_ts is None:
             self.first_data_ts = ts_val
-            self.wall_clock_start = time.time() # Thời gian thực tế (giây)
-
-            # Target Start = Hiện tại - Độ trễ (Lag)
-            now_ms = int(self.wall_clock_start * 1000)
+            self.wall_clock_start = time.time()
             target_start_ms = now_ms - self.simulation_lag
-
-            # Offset = Thời điểm mong muốn - Timestamp gốc
             self.time_offset = target_start_ms - self.first_data_ts
 
-        # Logic sleep để giả lập tốc độ
-        # Khoảng thời gian đã trôi qua trong log gốc (ms)
-        elapsed_ms = ts_val - self.first_data_ts
-        # Quy đổi ra giây để tính toán sleep
-        elapsed_seconds = elapsed_ms / 1000.0
-        # Thời gian thực tế cần đạt được
-        real_elapsed = (elapsed_seconds / self.speed_factor) - self.time_skip_accumulation
-        target_wall_time = self.wall_clock_start + real_elapsed
-        
-        sleep_duration = target_wall_time - time.time()
-        if sleep_duration > 0:
-            if sleep_duration > self.max_sleep_sec:
-                # Nếu phải ngủ quá lâu, thì bỏ qua bớt (skip) để tua nhanh
-                skip = sleep_duration - self.max_sleep_sec
-                self.time_skip_accumulation += skip
-                time.sleep(self.max_sleep_sec)
-            else:
-                time.sleep(sleep_duration)
+        # 2. Tính toán Timestamp mới dự kiến cho log
+        new_timestamp = int(ts_val + self.time_offset)
 
-        # Tạo timestamp mới và object UserLogRequest
-        try:
-            # Timestamp mới = Timestamp cũ + Offset
+        # 3. Kiểm tra điều kiện Real-time (nếu tùy chọn được bật)
+        is_reached_now = self.auto_realtime and (new_timestamp >= now_ms)
+
+        if is_reached_now:
+            # CHẾ ĐỘ THỜI GIAN THỰC (Real-time mode)
+            # Khóa offset để new_timestamp luôn bám sát thời gian thực tại
+            self.time_offset = int(time.time() * 1000) - ts_val
             new_timestamp = int(ts_val + self.time_offset)
             
+            # Đợi theo khoảng cách thực tế giữa các bài hát (tốc độ x1)
+            if self.prev_ts_val:
+                real_gap = (ts_val - self.prev_ts_val) / 1000.0
+                if real_gap > 0:
+                    time.sleep(min(real_gap, self.max_sleep_sec))
+            # logger.debug("Real-time mode active: Speed reset to x1.0")
+        else:
+            # CHẾ ĐỘ TUA NHANH (Turbo/Speed mode)
+            elapsed_ms = ts_val - self.first_data_ts
+            elapsed_seconds = elapsed_ms / 1000.0
+            real_elapsed = (elapsed_seconds / self.speed_factor) - self.time_skip_accumulation
+            target_wall_time = self.wall_clock_start + real_elapsed
+            
+            sleep_duration = target_wall_time - time.time()
+            if sleep_duration > 0:
+                if sleep_duration > self.max_sleep_sec:
+                    skip = sleep_duration - self.max_sleep_sec
+                    self.time_skip_accumulation += skip
+                    time.sleep(self.max_sleep_sec)
+                else:
+                    time.sleep(sleep_duration)
+
+        # Cập nhật trạng thái cho bản ghi kế tiếp
+        self.prev_ts_val = ts_val
+
+        # 4. Trả về object UserLogRequest
+        try:
             return UserLogRequest(
                 user_id=str(record['user_id']),
                 track_id=str(record['track_id']),
@@ -111,7 +120,7 @@ class MusicStreamPlayer:
                 duration=int(record.get('duration', 300)),
                 total_duration=int(record.get('total_duration', 300))
             )
-        except (ValidationError, ValueError, TypeError) as e:
+        except Exception as e:
             logger.warning(f"Skipping bad record: {e}")
             return None
 
@@ -124,6 +133,7 @@ def run():
     parser.add_argument("--speed", type=float, default=200.0, help="Tốc độ replay (mặc định x200)")
     parser.add_argument("--lag", type=int, default=5184000000, help="Độ trễ giả lập tính bằng ms (Mặc định 60 ngày)")
     parser.add_argument("--turbo", action="store_true", help="Chạy tốc độ tối đa (không sleep)")
+    parser.add_argument("--auto-realtime", action="store_true", default=True, help="Tự động chuyển sang chế độ real-time khi bắt kịp thời gian hiện tại")
     args = parser.parse_args()
     
     speed_factor = float('inf') if args.turbo else args.speed
@@ -135,7 +145,8 @@ def run():
     player = MusicStreamPlayer(
         data_dir=cfg.MUSIC_LOGS_DATA_PATH,
         speed_factor=speed_factor,
-        simulation_lag=args.lag
+        simulation_lag=args.lag,
+        auto_realtime=args.auto_realtime
     )
 
     total_sent = 0
